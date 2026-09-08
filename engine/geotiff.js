@@ -72,16 +72,89 @@ function strtod(text) {
   return Number(s);
 }
 
-async function inflate(bytes, expectedLength) {
-  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate'));
-  const chunks = [];
-  let total = 0;
-  for await (const chunk of stream) { chunks.push(chunk); total += chunk.length; }
-  if (total !== expectedLength) return null;
-  const out = new Uint8Array(total);
+/** Adler-32 of the uncompressed data, as stored at the end of a zlib stream. */
+function adler32(bytes) {
+  let a = 1, b = 0;
+  for (let i = 0; i < bytes.length;) {
+    const stop = Math.min(bytes.length, i + 5552); // NMAX: no overflow before reducing
+    for (; i < stop; i++) { a += bytes[i]; b += a; }
+    a %= 65521; b %= 65521;
+  }
+  return ((b << 16) | a) >>> 0;
+}
+
+function join(chunks, length) {
+  const out = new Uint8Array(length);
   let at = 0;
   for (const chunk of chunks) { out.set(chunk, at); at += chunk.length; }
   return out;
+}
+
+/**
+ * One decompression attempt. Returns {output, produced}: output is non-null only
+ * when the stream ended cleanly with exactly expectedLength bytes.
+ *
+ * The stream is drained with an explicit reader rather than `for await`, because
+ * ReadableStream async iteration is missing on older iOS Safari and this app is
+ * meant to run on whatever phone is on the boat.
+ */
+async function inflateOnce(bytes, expectedLength) {
+  let reader;
+  try {
+    reader = new Blob([bytes]).stream()
+      .pipeThrough(new DecompressionStream('deflate')).getReader();
+  } catch { return { output: null, produced: null }; }
+  const chunks = [];
+  let total = 0;
+  let clean = false;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) { clean = true; break; }
+      chunks.push(value);
+      total += value.length;
+      // uncompress() into a rawN buffer fails with Z_BUF_ERROR when the output is
+      // longer; stopping here also bounds memory for a hostile response.
+      if (total > expectedLength) {
+        try { await reader.cancel(); } catch { /* yoksay */ }
+        return { output: null, produced: null };
+      }
+    }
+  } catch { /* asagida ele aliniyor */ }
+  if (total !== expectedLength) return { output: null, produced: null };
+  const produced = join(chunks, total);
+  return { output: clean ? produced : null, produced };
+}
+
+/**
+ * Inflate one Deflate block the way the C's zlib uncompress() does.
+ *
+ * uncompress() stops at the end of the zlib stream and ignores any bytes that
+ * follow inside the declared StripByteCounts/TileByteCounts. DecompressionStream
+ * instead rejects them as trailing junk. A file the C decodes must not fail here.
+ *
+ * But a corrupt block ALSO fails late, after emitting output, and accepting that
+ * would mean routing on wrong depths. The two are told apart by the checksum:
+ * a zlib stream ends with the Adler-32 of its own output, so if the output we
+ * produced is genuine, that checksum must appear in the input at the stream end.
+ * We look for it and re-run on the exact stream; corrupt data never matches.
+ *
+ * Returns null on any failure, so the caller reports GeoTIFFError(12) — the same
+ * status the C returns for every non-Z_OK result.
+ */
+async function inflate(bytes, expectedLength) {
+  const first = await inflateOnce(bytes, expectedLength);
+  if (first.output) return first.output;
+  if (!first.produced) return null;
+
+  const want = adler32(first.produced);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  for (let p = 2; p + 4 <= bytes.length; p++) {
+    if (view.getUint32(p, false) !== want) continue;
+    const retry = await inflateOnce(bytes.subarray(0, p + 4), expectedLength);
+    if (retry.output) return retry.output;
+  }
+  return null;
 }
 
 export class GeoTIFFError extends Error {

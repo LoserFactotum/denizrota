@@ -53,7 +53,10 @@ function vesselFor(boat) {
  * cell inside the horizontal buffer, and both flanks of every diagonal step
  * must be covered and deep enough. Returns null when clean, else a description.
  */
-export function auditPath(grid, path, boat) {
+export function auditPath(grid, path, boat, start, goal) {
+  if (!path || !path.length) return 'yol bos';
+  if (start !== undefined && path[0] !== start) return `yol istenen baslangictan (${start}) baslamiyor`;
+  if (goal !== undefined && path[path.length - 1] !== goal) return `yol istenen varisa (${goal}) ulasmiyor`;
   const { rows, columns } = grid.bounds;
   const required = minimumDepthFor(boat);
   const radius = Math.ceil(boat.horizontalBuffer / grid.bounds.cell);
@@ -115,7 +118,14 @@ export function diagnoseAnchor({ grid, boat, point, searchMetres = 12000 }) {
     depthUncertaintyM: new Float64Array(grid.total),
     flags: grid.flags,
   };
-  const { pass, radius, required, prefix, stride } = passableCells(engineGrid, vesselFor(boat));
+  const { pass, radius, prefix, stride } = passableCells(engineGrid, vesselFor(boat));
+  // passableCells' own `required` is the right-hand side of
+  //   depth + waterLevelLowerM - uncertainty >= required
+  // so it deliberately EXCLUDES the water-level drop. Comparing a raw cell depth
+  // against it would understate what the boat actually needs. The effective
+  // per-cell threshold is minimumDepthFor(boat) — use that, so the explanation
+  // and the router agree on the same rule.
+  const required = minimumDepthFor(boat);
   const index = indexOf(bounds, point);
   if (pass[index]) return null;
 
@@ -269,6 +279,11 @@ function legError(status, from, to) {
 
 /** Search every leg on a prepared grid and return the joined, audited geometry. */
 export function routeOnGrid({ grid, anchors, boat, shouldCancel }) {
+  // Mirrors the Swift route(): a cancelled plan must never come back as a route.
+  const stopIfCancelled = () => {
+    if (shouldCancel?.()) throw new PlanningError('Hesap iptal edildi.', { status: DR_CANCELLED });
+  };
+  stopIfCancelled();
   const bounds = grid.bounds;
   const vessel = vesselFor(boat);
   const uncertainty = new Float64Array(grid.total); // this adapter has no measured uncertainty
@@ -286,6 +301,7 @@ export function routeOnGrid({ grid, anchors, boat, shouldCancel }) {
   let shallowest = Infinity;
   let gridDistanceM = 0;
   for (let leg = 0; leg < anchors.length - 1; leg++) {
+    stopIfCancelled();
     const from = anchors[leg], to = anchors[leg + 1];
     const start = indexOf(bounds, from), goal = indexOf(bounds, to);
     const result = plan(engineGrid, vessel, start, goal, { maxCells: DEFAULT_MAX_CELLS, shouldCancel });
@@ -294,7 +310,7 @@ export function routeOnGrid({ grid, anchors, boat, shouldCancel }) {
       throw blockedError(point, diagnoseAnchor({ grid, boat, point }), result.status);
     }
     if (result.status !== DR_OK) throw legError(result.status, from, to);
-    const problem = auditPath(grid, result.path, boat);
+    const problem = auditPath(grid, result.path, boat, start, goal);
     if (problem) {
       throw new PlanningError('Bagimsiz guvenlik denetimi rotayi reddetti; rota verilmedi.', { problem });
     }
@@ -317,6 +333,7 @@ export function routeOnGrid({ grid, anchors, boat, shouldCancel }) {
     }
     points.push(to);
   }
+  stopIfCancelled();
   const deduped = [];
   for (const p of points) {
     const last = deduped[deduped.length - 1];
@@ -378,7 +395,7 @@ export async function planRoute({
     const features = parseOSM(osmDocument, bounds);
 
     const grid = prepareGrid({
-      bounds, raster, features, minimumDepth, maxCells,
+      bounds, raster, features, minimumDepth, maxCells, shouldCancel,
       onProgress: (message) => onProgress?.(message, 0.5),
     });
 
@@ -395,6 +412,7 @@ export async function planRoute({
       throw error;
     }
 
+    if (signal?.aborted) throw new PlanningError('Hesap iptal edildi.');
     const [bathymetrySHA256, osmSHA256] = await Promise.all([sha256Hex(bathy.bytes), sha256Hex(osm.bytes)]);
     onProgress?.('Rota hesaplandi', 1);
     return {

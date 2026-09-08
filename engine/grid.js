@@ -206,16 +206,23 @@ export function parseOSM(document, bounds) {
  * Build the routing grid: land/water mask, obstacle paint, per-cell shallowest
  * model depth. Unknown cells stay unknown. Nothing is interpolated.
  */
-export function prepareGrid({ bounds, raster, features, minimumDepth, onProgress, maxCells = DEFAULT_MAX_CELLS }) {
+export function prepareGrid({ bounds, raster, features, minimumDepth, onProgress, shouldCancel, maxCells = DEFAULT_MAX_CELLS }) {
   const { rows, columns, cell } = bounds;
   const total = rows * columns;
   const mask = new Uint8Array(total);
+  // Same three cancellation points as the Swift prepare(): a large grid can take
+  // seconds, and the user must be able to stop it.
+  const stopIfCancelled = () => {
+    if (shouldCancel?.()) throw new PlanningError('Hesap iptal edildi.');
+  };
+  stopIfCancelled();
   onProgress?.('Kiyi sinirlari hesaplaniyor…');
   const maskResult = coastMask(rows, columns, cell, features.coast, features.segmentCount, mask, maxCells);
   if (maskResult !== 0) throw new PlanningError(`Kiyi siniri olusturulamadi (${maskResult}).`);
 
   onProgress?.('Kayalik, batik ve engeller isleniyor…');
   for (const shape of features.obstacles) {
+    stopIfCancelled();
     const flat = new Float64Array(shape.points.length * 2);
     for (let i = 0; i < shape.points.length; i++) {
       flat[i * 2] = shape.points[i].x;
@@ -237,6 +244,7 @@ export function prepareGrid({ bounds, raster, features, minimumDepth, onProgress
   let unknown = 0, shallow = 0, shallowest = Infinity;
   const north = bounds.north, west = bounds.west;
   for (let row = 0; row < rows; row++) {
+    if ((row & 31) === 0) stopIfCancelled();
     // (row * cell) / ky, not row * (cell / ky): same order as the reference.
     const cellNorth = north - row * cell / ky;
     const cellSouth = cellNorth - cellLatDeg;

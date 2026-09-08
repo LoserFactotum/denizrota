@@ -45,7 +45,7 @@ function packU32(value, little) {
 }
 
 /** Port of MarineGridTests.py fixture(): a 3x2 GeoTIFF in 32 valid encodings. */
-async function tiffFixture({ little = false, compressed = false, pixelPoint = false, matrix = false, signed = false } = {}) {
+async function tiffFixture({ little = false, compressed = false, pixelPoint = false, matrix = false, signed = false, pad = 0 } = {}) {
   const values = [-10, -20, 3, -40, -9999, -60];
   const raw = new Uint8Array(signed ? 12 : 24);
   const rawView = new DataView(raw.buffer);
@@ -53,7 +53,14 @@ async function tiffFixture({ little = false, compressed = false, pixelPoint = fa
     if (signed) rawView.setInt16(i * 2, value, little);
     else rawView.setFloat32(i * 4, value, little);
   });
-  const payload = compressed ? await deflate(raw) : raw;
+  let payload = compressed ? await deflate(raw) : raw;
+  // pad: declared byte count longer than the actual stream. zlib's uncompress()
+  // ignores those bytes, so the reader must too.
+  if (pad) {
+    const padded = new Uint8Array(payload.length + pad);
+    padded.set(payload, 0);
+    payload = padded;
+  }
 
   const fields = new Map([
     [256, [4, [3]]], [257, [4, [2]]], [258, [3, [signed ? 16 : 32]]],
@@ -218,6 +225,27 @@ async function marineGrid(check) {
   check.equal(truncationAccepted, 0, `${good.length} kesilmis dosyanin tamami reddedildi`);
   check.ok(await fails(new TextEncoder().encode('<ServiceException>error')), 'XML hata sayfasi derinlik sanilmadi');
 
+  // Deflate blocks whose declared length runs past the end of the zlib stream:
+  // zlib's uncompress() decodes them, so this reader must decode them too.
+  let padFailures = 0;
+  for (const pad of [1, 4, 16]) {
+    const padded = await tiffFixture({ compressed: true, pad });
+    try {
+      const raster = await readGeoTIFF(padded);
+      if (!(raster.rows === 2 && raster.columns === 3 && raster.values[0] === -10)) padFailures++;
+    } catch { padFailures++; }
+  }
+  check.equal(padFailures, 0, 'bildirilen uzunlugu asan Deflate bloklari yine de okundu');
+
+  // Every decompression failure must arrive as GeoTIFFError(12), like the C's
+  // uncompress() != Z_OK — not as an unclassified runtime error.
+  const corrupt = await tiffFixture({ compressed: true });
+  corrupt[corrupt.length - 6] ^= 0xff;
+  corrupt[corrupt.length - 7] ^= 0xff;
+  let corruptCode = null;
+  try { await readGeoTIFF(corrupt); } catch (error) { corruptCode = error?.code ?? `siniflandirilmamis: ${error}`; }
+  check.equal(corruptCode, 12, 'bozuk Deflate blogu GeoTIFF 12 olarak bildirildi');
+
   let seed = 15;
   const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
   let fuzzAccepted = 0;
@@ -256,7 +284,18 @@ async function marineGrid(check) {
   check.equal(mask[at(50, 150)], 2, 'kiyinin batisi kara');
   check.equal(mask[at(250, 150)], 1, 'kiyinin dogusu deniz');
 
+  // Two coastlines crossing a scanline at exactly the same x (a coast that
+  // touches a point and returns) must cancel, not flip the whole row. The C's
+  // qsort leaves their order unspecified, so this must not depend on it.
+  const touching = Float64Array.from([
+    150, -100, 150, 400,   // kuzeye
+    150, 400, 150, -100,   // ayni cizgi, guneye
+  ]);
+  check.equal(coastMask(rows, cols, cell, touching, 2, mask), 0, 'degen kiyi maskesi olustu');
+  check.equal(mask[at(50, 150)], mask[at(250, 150)], 'birbirini goturen kesisim ciftinde satir donmedi');
+
   // Tiny island entirely within a cell cannot disappear through centre sampling.
+  coastMask(rows, cols, cell, mainland, 1, mask);
   blockShape(rows, cols, cell, Float64Array.from([201, 201, 203, 201, 203, 203, 201, 203, 201, 201]), 5, true, mask);
   check.equal(mask[at(205, 205)], 4, 'bir hucreden kucuk adacik yok olmadi');
 

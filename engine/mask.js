@@ -12,7 +12,11 @@ export const UNKNOWN = 0, WATER = 1, LAND = 2, BLOCKED = 4;
 function segmentDistance(px, py, ax, ay, bx, by) {
   const dx = bx - ax, dy = by - ay, len = dx * dx + dy * dy;
   let t = len > 0 ? ((px - ax) * dx + (py - ay) * dy) / len : 0;
-  t = Math.max(0, Math.min(1, t));
+  // C's fmax/fmin discard a NaN operand and return the other one, so the C
+  // clamps a NaN t to 1 and still measures a real distance. JS Math.min/max
+  // propagate NaN, which would make `distance <= pad` false and leave a cell
+  // the C blocks unblocked — the unsafe direction. Match the C.
+  t = Number.isNaN(t) ? 1 : Math.max(0, Math.min(1, t));
   return Math.hypot(px - ax - t * dx, py - ay - t * dy);
 }
 
@@ -125,15 +129,35 @@ export function coastMask(rows, cols, cell, coast, count, mask, maxCells = 10000
     slice.sort((a, b) => (crossX[a] - crossX[b]) || (a - b));
     let next = 0;
     let label = crossNorth[slice[0]] ? LAND : WATER;
+    let ambiguous = false;
     const rowBase = row * cols;
     for (let col = 0; col < cols; col++) {
       const x = (col + 0.5) * cell;
       while (next < c && crossX[slice[next]] < x) {
-        label = crossNorth[slice[next]] ? WATER : LAND;
-        next++;
+        // Crossings at the SAME x are consumed as one run. Taking them one by
+        // one would make the label for the rest of the row depend on their sort
+        // order — and the C's qsort leaves that order unspecified. A run that
+        // cancels (equal numbers each way, a coastline touching a point and
+        // returning) leaves the side unchanged; a run all one way sets it; a
+        // run that is genuinely lopsided is order-dependent, so the rest of the
+        // row is left UNKNOWN rather than guessed.
+        let end = next + 1;
+        while (end < c && crossX[slice[end]] === crossX[slice[next]]) end++;
+        if (end - next === 1) {
+          label = crossNorth[slice[next]] ? WATER : LAND;
+        } else {
+          let north = 0;
+          for (let k = next; k < end; k++) north += crossNorth[slice[k]];
+          const south = (end - next) - north;
+          if (north === south) { /* cancels: side unchanged */ }
+          else if (north === 0 || south === 0) label = crossNorth[slice[next]] ? WATER : LAND;
+          else ambiguous = true;
+        }
+        next = end;
       }
       // Inconsistent adjacent orientations imply incomplete/broken geometry.
-      const valid = next === 0 || next === c || crossNorth[slice[next - 1]] !== crossNorth[slice[next]];
+      const valid = !ambiguous
+        && (next === 0 || next === c || crossNorth[slice[next - 1]] !== crossNorth[slice[next]]);
       if (mask[rowBase + col] !== BLOCKED) mask[rowBase + col] = valid ? label : UNKNOWN;
     }
   }
