@@ -1,0 +1,37 @@
+{
+  "status": 0,
+  "grid_rows": 519,
+  "grid_columns": 386,
+  "cell_m": 150.0,
+  "coast_ways": 304,
+  "coast_segments": 34399,
+  "obstacle_shapes": 381,
+  "mask_counts": {
+    "1": 119779,
+    "8": 8745,
+    "4": 6105,
+    "2": 65705
+  },
+  "raster_rows": 691,
+  "raster_columns": 644,
+  "raster_step": 0.0010421445299677622,
+  "source": "EMODnet mean DTM including GEBCO infill; cell-level lineage not resolved",
+  "osm_timestamp": "2026-09-08T14:20:21Z",
+  "raster_sha256": "2f87f323d9bd256171cd781b3210028934cf332e029854d5c7ae4601a2fccf63",
+  "osm_sha256": "340ad28b50dd1e39888fdb21f16c0f188bfa6b071aa0927d1c656e941242e18b",
+  "raster_url": "https://ows.emodnet-bathymetry.eu/wcs?bbox=27.24%2C36.49%2C27.91075713031187%2C37.21012187020773&compression=NONE&coverage=emodnet%3Amean&crs=EPSG%3A4326&format=GeoTIFF&interpolation=nearest&request=GetCoverage&resx=0.0010416666666666667&resy=0.0010416666666666667&service=WCS&version=1.0.0",
+  "osm_query": "[out:json][timeout:90];(\nway[\"natural\"=\"coastline\"](36.49,27.24,37.21012187020773,27.91075713031187);\nnwr[\"seamark:type\"~\"^(rock|wreck|obstruction|restricted_area|military_area|marine_farm)$\"](36.49,27.24,37.21012187020773,27.91075713031187);\nnwr[\"man_made\"~\"^(pier|breakwater|groyne)$\"](36.49,27.24,37.21012187020773,27.91075713031187);\nnwr[\"natural\"=\"reef\"](36.49,27.24,37.21012187020773,27.91075713031187););out body geom;",
+  "path_cells": 478,
+  "grid_distance_nm": 41.58618737760527,
+  "grid_duration_at_5kn_hours": 8.317237475521054,
+  "minimum_model_depth": 8.41796875,
+  "start": [
+    36.7,
+    27.7
+  ],
+  "goal": [
+    37.01,
+    27.435
+  ],
+  "validation": "C numeric decoder + C coast/obstacle mask + C A*: every path edge and buffer checked. Swift/iOS not built."
+}

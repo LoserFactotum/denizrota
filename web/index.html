@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=5">
+<meta name="theme-color" content="#0b3d52">
+<meta name="description" content="Acik batimetri ve OpenStreetMap kiyi/engel verisiyle tekneniz icin gecilebilir rota arar.">
+<title>DenizRota</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="DenizRota">
+<link rel="stylesheet" href="vendor/leaflet.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 L18 13 H6 Z M4 15 h16 l-2.2 5.2a2 2 0 0 1-1.84 1.2H8.04a2 2 0 0 1-1.84-1.2Z"/></svg>
+    <span>DenizRota</span>
+  </div>
+  <div class="search">
+    <input id="search-input" type="search" autocomplete="off" enterkeyhint="search"
+           placeholder="Koy, liman, koordinat veya Google Maps baglantisi" aria-label="Yer ara">
+    <button id="search-clear" class="icon-button ghost" type="button" aria-label="Aramayi temizle" hidden>✕</button>
+    <div id="search-results" class="search-results" hidden role="listbox"></div>
+  </div>
+  <button id="menu-button" class="icon-button" type="button" aria-label="Menu">☰</button>
+</header>
+
+<main class="map-wrap">
+  <div id="map" role="application" aria-label="Deniz haritasi"></div>
+
+  <div class="map-badges">
+    <span id="mode-badge" class="badge">Elle cizim · derinlik kontrolu yok</span>
+    <span id="cache-badge" class="badge subtle" hidden></span>
+  </div>
+
+  <div class="map-controls">
+    <button id="locate-button" class="map-button" type="button" aria-label="Konumuma git" title="Konumuma git">◎</button>
+    <button id="fit-button" class="map-button" type="button" aria-label="Rotayi sigdir" title="Rotayi sigdir">⤢</button>
+    <button id="seamark-button" class="map-button active" type="button" aria-label="Deniz isaretleri" title="Deniz isaretleri">⚓</button>
+    <button id="grid-button" class="map-button" type="button" aria-label="Hesap alanini goster" title="Hesap alani" disabled>▦</button>
+  </div>
+
+  <div id="gps-chip" class="gps-chip">GPS bekleniyor</div>
+
+  <div id="alert-strip" class="alert-strip" hidden role="alert"></div>
+</main>
+
+<section id="panel" class="panel">
+  <div class="panel-grip" id="panel-grip" role="button" tabindex="0" aria-label="Paneli buyut veya kucult"></div>
+
+  <!-- ---------------------------------------------------------- planlama -->
+  <div id="plan-view">
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-tab="route" role="tab">Rota</button>
+      <button class="tab" data-tab="boat" role="tab">Teknem</button>
+      <button class="tab" data-tab="data" role="tab">Veri</button>
+    </div>
+
+    <div class="tab-body" data-panel="route">
+      <div class="route-head">
+        <input id="route-name" class="route-name" value="Yeni rota" aria-label="Rota adi">
+        <div class="route-actions">
+          <button id="reverse-button" class="chip" type="button" title="Rotayi tersine cevir">⇄ Ters</button>
+          <button id="clear-button" class="chip" type="button">Temizle</button>
+        </div>
+      </div>
+
+      <ol id="point-list" class="point-list" aria-label="Rota noktalari"></ol>
+      <p id="point-hint" class="hint">Haritaya dokunarak veya yukaridan arayarak baslangic ve varis ekleyin.</p>
+
+      <div class="metrics" id="metrics">
+        <div class="metric"><span class="metric-label">MESAFE</span><b id="m-distance">—</b><span class="metric-unit">deniz mili</span></div>
+        <div class="metric"><span class="metric-label">SURE</span><b id="m-duration">—</b><span class="metric-unit" id="m-speed-unit">5,0 knot ile</span></div>
+        <div class="metric"><span class="metric-label">SIMDI CIKARSAN</span><b id="m-arrival">—</b><span class="metric-unit" id="m-sun">—</span></div>
+      </div>
+
+      <label class="speed-row">
+        <span>Planlanan hiz</span>
+        <input id="speed" type="range" min="1" max="30" step="0.5" value="5">
+        <output id="speed-out">5,0 kn</output>
+      </label>
+
+      <div id="calc-block" class="calc-block">
+        <button id="calc-button" class="primary" type="button" disabled>Derinlik ve engellere gore hesapla</button>
+        <div id="progress" class="progress" hidden>
+          <div class="progress-bar"><i id="progress-fill"></i></div>
+          <div class="progress-row"><span id="progress-text">Hazirlaniyor…</span><button id="cancel-button" class="chip" type="button">Iptal</button></div>
+        </div>
+        <div id="calc-error" class="error" hidden></div>
+      </div>
+
+      <div id="result-block" class="result-block" hidden>
+        <div class="result-head">
+          <span class="ok-dot"></span>
+          <span id="result-summary"></span>
+        </div>
+        <div id="leg-list" class="leg-list"></div>
+        <div class="row-buttons">
+          <button id="track-button" class="primary" type="button">Seyir takibini baslat</button>
+        </div>
+      </div>
+
+      <div class="row-buttons wrap">
+        <button id="save-button" class="chip" type="button">Kaydet</button>
+        <button id="routes-button" class="chip" type="button">Rotalarim</button>
+        <button id="gpx-export" class="chip" type="button">GPX indir</button>
+        <button id="gpx-import" class="chip" type="button">GPX yukle</button>
+        <button id="share-button" class="chip" type="button">Baglanti kopyala</button>
+        <input id="gpx-file" type="file" accept=".gpx,application/gpx+xml,text/xml" hidden>
+      </div>
+    </div>
+
+    <div class="tab-body" data-panel="boat" hidden>
+      <p class="hint">Olculer kendi tekneniz icindir. Aranan derinlik = su cekimi + omurga alti pay + model payi + su seviyesi dususu.</p>
+      <div id="boat-fields" class="fields"></div>
+      <div class="required-depth">Aranan model derinligi: <b id="required-depth">7,5 m</b></div>
+      <label class="switch-row">
+        <span>Hesap cozunurlugu</span>
+        <select id="resolution">
+          <option value="auto">Otomatik (alana gore en ince)</option>
+          <option value="40">40 m · en hassas, en yavas</option>
+          <option value="50">50 m</option>
+          <option value="75">75 m</option>
+          <option value="100">100 m</option>
+          <option value="150">150 m · en hizli</option>
+        </select>
+      </label>
+      <p class="hint">Daha ince hucre kiyi cizgisini, adaciklari ve dar gecisleri daha iyi cozer. Derinlik her zaman en az bir kaynak pikseli genisliginde pencerenin <b>en sig</b> degerinden alinir; ince hucre derinlik guvenligini gevsetmez.</p>
+    </div>
+
+    <div class="tab-body" data-panel="data" hidden>
+      <div id="provenance" class="provenance"><p class="hint">Bir rota hesaplandiginda kaynak ayrintilari burada gorunur.</p></div>
+    </div>
+  </div>
+
+  <!-- ------------------------------------------------------------- seyir -->
+  <div id="track-view" hidden>
+    <div class="track-head">
+      <div>
+        <div id="track-target" class="track-target">—</div>
+        <div id="track-sub" class="track-sub">—</div>
+      </div>
+      <button id="track-stop" class="chip danger" type="button">Bitir</button>
+    </div>
+    <div class="track-grid">
+      <div class="metric big"><span class="metric-label">KALAN</span><b id="t-remaining">—</b><span class="metric-unit">deniz mili</span></div>
+      <div class="metric big"><span class="metric-label">GPS HIZI</span><b id="t-speed">—</b><span class="metric-unit">knot</span></div>
+      <div class="metric big"><span class="metric-label">KALAN SURE</span><b id="t-eta">—</b><span class="metric-unit" id="t-arrival">—</span></div>
+    </div>
+    <div class="track-grid">
+      <div class="metric"><span class="metric-label">KERTERIZ</span><b id="t-bearing">—</b><span class="metric-unit">gercek</span></div>
+      <div class="metric"><span class="metric-label">ROTADAN SAPMA</span><b id="t-xte">—</b><span class="metric-unit">m</span></div>
+      <div class="metric"><span class="metric-label">MODEL DERINLIGI</span><b id="t-depth">—</b><span class="metric-unit">m</span></div>
+    </div>
+    <div class="row-buttons">
+      <button id="t-next" class="primary" type="button" disabled>Noktaya ulastim →</button>
+    </div>
+    <p class="hint">Turuncu cizgi yalnizca hedef yonudur; rotadan sapinca yeni bir derinlik/engel kontrolu yapilmaz. Uygulama on planda oldugu surece takip eder.</p>
+  </div>
+</section>
+
+<!-- --------------------------------------------------------------- diyaloglar -->
+<dialog id="menu-dialog" class="sheet">
+  <h2>DenizRota</h2>
+  <div class="menu-list">
+    <button data-action="new">Yeni rota</button>
+    <button data-action="routes">Rotalarim</button>
+    <button data-action="about">Nasil calisir, neye guvenilmez</button>
+    <button data-action="cache">Indirilen veriyi temizle</button>
+  </div>
+  <p class="version">Surum 0.3 · web · <span id="build-note"></span></p>
+  <form method="dialog"><button class="primary">Kapat</button></form>
+</dialog>
+
+<dialog id="routes-dialog" class="sheet">
+  <h2>Rotalarim</h2>
+  <div id="routes-list" class="routes-list"></div>
+  <form method="dialog"><button class="primary">Kapat</button></form>
+</dialog>
+
+<dialog id="point-dialog" class="sheet">
+  <h2 id="point-dialog-title">Nokta</h2>
+  <label class="field"><span>Ad</span><input id="point-name" type="text"></label>
+  <div class="two">
+    <label class="field"><span>Enlem</span><input id="point-lat" type="text" inputmode="decimal"></label>
+    <label class="field"><span>Boylam</span><input id="point-lon" type="text" inputmode="decimal"></label>
+  </div>
+  <p class="hint">Ondalik derece. Google Maps'ten kopyaladiginiz "36.6661, 27.5105" gibi bir metni enlem alanina yapistirabilirsiniz.</p>
+  <div class="row-buttons">
+    <button id="point-delete" class="chip danger" type="button">Sil</button>
+    <button id="point-save" class="primary" type="button">Kaydet</button>
+  </div>
+  <form method="dialog"><button class="chip">Vazgec</button></form>
+</dialog>
+
+<dialog id="about-dialog" class="sheet tall">
+  <h2>Nasil calisir, neye guvenilmez</h2>
+  <div class="prose">
+    <h3>Ne yapar</h3>
+    <p>Sectiginiz noktalar arasinda, teknenizin su cekimine ve sectiginiz paylara gore
+      <b>gecilebilir</b> bir yol arar. Derinlik modeli EMODnet Bathymetry (GEBCO dolgusu icerir);
+      kiyi, kayalik, batik, resif, iskele ve kisitli alanlar OpenStreetMap'ten gelir.</p>
+    <h3>Nasil karar verir</h3>
+    <p>Alan kare hucrelere bolunur. Bir hucrenin derinligi, o hucreyle kesisen <b>tum</b> kaynak
+      piksellerinin <b>en sig</b> degeridir; bir tanesi bile eksikse hucre bilinmeyen sayilir ve
+      rota oradan gecmez. Hucre kaynak pikselinden kucukse en az bir piksel genisliginde pencere
+      taranir, boylece ince hesap derinlik guvenligini gevsetmez. Kara ve engellere degen hucreler
+      kapatilir, ustune sectiginiz kiyi/engel payi eklenir. Yol bulunduktan sonra her hucre ve
+      cevresindeki tum pay alani <b>bagimsiz olarak yeniden</b> denetlenir; denetim gecmezse rota verilmez.</p>
+    <h3>Neye guvenilmez</h3>
+    <ul>
+      <li>Bu resmi bir seyir haritasi degildir. Guncel harita, fener listesi ve gozle kontrol yerine gecmez.</li>
+      <li>Model gridi yaklasik 115 m'dir. Dar koylar, liman girisleri ve kucuk kayaliklar cozulmeyebilir;
+        bazi koylarin ici model tarafindan hic gorulmez.</li>
+      <li>Canli gelgit, ruzgar, dalga, akinti, AIS, gemi trafigi ve gecici seyir yasagi hesaba katilmaz.</li>
+      <li>Indirme tarihi, deniz tabaninin olculdugu tarih degildir. Model payi olculmus bir hata siniri degildir.</li>
+      <li>Takip yalnizca uygulama on plandayken calisir. Rotadan sapinca cizilen turuncu cizgi kontrol edilmemistir.</li>
+    </ul>
+    <h3>Kaynaklar</h3>
+    <ul>
+      <li><a href="https://emodnet.ec.europa.eu/en/bathymetry" target="_blank" rel="noopener">EMODnet Bathymetry</a> — derinlik modeli</li>
+      <li><a href="https://www.gebco.net/data-products/gridded-bathymetry-data" target="_blank" rel="noopener">GEBCO</a> — modelin dolgu kaynagi</li>
+      <li><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap katkicilari</a> — kiyi ve engeller, ODbL</li>
+      <li><a href="https://www.openseamap.org/" target="_blank" rel="noopener">OpenSeaMap</a> — deniz isaretleri, CC BY-SA 2.0</li>
+    </ul>
+    <p class="hint">Hesap, abonelik, reklam ve analiz yoktur. Kendi sunucumuz yoktur; istekler dogrudan
+      yukaridaki acik servislere gider. Rotalariniz yalnizca bu cihazda kalir.</p>
+  </div>
+  <form method="dialog"><button class="primary">Anladim</button></form>
+</dialog>
+
+<dialog id="confirm-dialog" class="sheet bottom">
+  <h2 id="confirm-title">Emin misiniz?</h2>
+  <p id="confirm-text" class="prose"></p>
+  <div class="row-buttons">
+    <button id="confirm-no" class="chip" type="button">Vazgec</button>
+    <button id="confirm-yes" class="primary" type="button">Devam</button>
+  </div>
+</dialog>
+
+<script src="vendor/leaflet.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

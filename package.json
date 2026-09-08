@@ -1,0 +1,14 @@
+{
+  "name": "denizrota",
+  "version": "0.3.0",
+  "description": "Deniz rotasi planlayici — acik batimetri ve OSM kiyi/engel verisiyle guvenli gecis arama",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node test/run.mjs",
+    "live": "node test/live.mjs",
+    "serve": "node test/serve.mjs",
+    "deploy": "node scripts/deploy.mjs",
+    "icons": "node scripts/make-icons.mjs"
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "anchors": [
+    {
+      "name": "Bencik agzi",
+      "latitude": 36.75647,
+      "longitude": 28.04228
+    },
+    {
+      "name": "Palamutbuku",
+      "latitude": 36.6661,
+      "longitude": 27.5105
+    }
+  ],
+  "boat": {
+    "draft": 1.5,
+    "underKeel": 1,
+    "modelAllowance": 5,
+    "waterLevelDrop": 0,
+    "horizontalBuffer": 150
+  },
+  "minimumModelDepth": 7.5,
+  "cellMeters": 75,
+  "gridRows": 964,
+  "gridColumns": 1248,
+  "west": 27.25,
+  "south": 36.4,
+  "east": 28.300030196082634,
+  "north": 37.05020952107924,
+  "pathCells": 636,
+  "waypoints": 117,
+  "gridDistanceNm": 28.65094654759554,
+  "routeDistanceNm": 28.669811174844092,
+  "durationHoursAtSpeed": 5.733962234968818,
+  "speedKnots": 5,
+  "shallowestModelDepthOnRoute": 12.27734375,
+  "legs": [
+    {
+      "from": "Bencik agzi",
+      "to": "Palamutbuku",
+      "cells": 636,
+      "gridDistanceM": 53061.55300614694,
+      "shallowestModelDepth": 12.27734375
+    }
+  ],
+  "calculatedAt": 1788906527372,
+  "sourceLabel": "EMODnet DTM · GEBCO dolgusu dahil",
+  "bathymetryDownloadedAt": 1788906525336,
+  "bathymetryFromCache": false,
+  "osmDownloadedAt": 1788906527057,
+  "osmFromCache": false,
+  "osmTimestamp": "2026-09-08T22:27:03Z",
+  "bathymetryURL": "https://ows.emodnet-bathymetry.eu/wcs?bbox=27.24%2C36.39%2C28.310030196082636%2C37.06020952107924&compression=NONE&coverage=emodnet%3Amean&crs=EPSG%3A4326&format=GeoTIFF&interpolation=nearest&request=GetCoverage&resx=0.0010416666666666667&resy=0.0010416666666666667&service=WCS&version=1.0.0",
+  "osmQuery": "[out:json][timeout:90];(\nway[\"natural\"=\"coastline\"](36.39,27.24,37.06020952107924,28.310030196082636);\nnwr[\"seamark:type\"~\"^(rock|wreck|obstruction|restricted_area|military_area|marine_farm)$\"](36.39,27.24,37.06020952107924,28.310030196082636);\nnwr[\"man_made\"~\"^(pier|breakwater|groyne)$\"](36.39,27.24,37.06020952107924,28.310030196082636);\nnwr[\"natural\"=\"reef\"](36.39,27.24,37.06020952107924,28.310030196082636);\n);out body geom;",
+  "bathymetrySHA256": "a7daeaa17d82c1d0e73a5cde02be8d786fb138a1d7baabf54cd07ded2bd9af77",
+  "osmSHA256": "781c407ed977cddf5118becf12442333feb64ead2721fa2ae0387c26b8ccaa90",
+  "sourceLatitudeStep": 0.0010423165180081372,
+  "margin": 0.25,
+  "widenedSearchArea": false,
+  "attempts": [],
+  "coastWays": 558,
+  "coastSegments": 54571,
+  "obstacleCount": 509,
+  "unknownCellCount": 0,
+  "shallowCellCount": 63205,
+  "totalCellCount": 1203072,
+  "elapsedMs": 4969,
+  "validation": "JS engine: numeric GeoTIFF decode + coast/obstacle mask + A*, every returned cell and its full horizontal buffer re-checked independently."
+}
