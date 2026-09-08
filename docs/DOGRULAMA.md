@@ -52,7 +52,8 @@ bariyerlerde düz çizgiye düşülmemesi, köşe kesmeme, kapalı başlangıç/
 taşınmaması, pay uygulaması, geçersiz girdiler. Sonra **300 rastgele gridde**
 bağımsız bir O(V²) Dijkstra ile birebir mesafe karşılaştırması.
 
-Toplam: **139 kontrol**, `npm test` ile ~250 ms, ağ gerektirmez.
+Toplam: **143 kontrol**, `npm test` ile ~250 ms, ağ gerektirmez. Bunlara Deflate
+bloklarında dolgu/bozulma ayrımı ve eşit-x kıyı kesişimleri de dahildir.
 
 ## 3. Gerçek veriyle uçtan uca
 
@@ -60,22 +61,42 @@ Toplam: **139 kontrol**, `npm test` ile ~250 ms, ağ gerektirmez.
 Bencik ağzı → Palamutbükü:
 
 ```
-75 m hücre · 1248 × 964 grid · 636 yol hücresi
-28,67 deniz mili · 5 knot ile 5 sa 44 dk
+75 m hücre · 1248 × 964 grid · 636 yol hücresi · 10 dönüş noktası
+27,18 deniz mili · 5 knot ile 5 sa 26 dk
 yoldaki en sığ model derinliği 12,28 m (eşik 7,5 m)
 bilinmeyen hücre 0 · engel geometrisi 509 · kıyı yolu 558
 ```
+
+(Düzleştirmeden önce aynı yol 117 nokta ve 28,67 nm idi.)
 
 Sonuçlar `evidence/bencik-palamut/` içinde: istek URL'leri, kaynak SHA-256'ları,
 maske ve GeoJSON.
 
 ## 4. Bağımsız çalışma zamanı denetimi
 
-Test dışında, **her hesapta** rota teslim edilmeden önce `auditPath` sıfırdan
-yeniden denetler: yolun her hücresi, o hücrenin tüm pay komşuluğu ve her
-diyagonal geçişin iki yanı kapsanır ve derinlik eşiği yeniden kontrol edilir.
-Denetim geçmezse rota **verilmez**, hata döner. Bu bilinçli bir tekrardır:
-arama motorundaki bir hata sessizce geçerli görünen bir rota üretemesin diye.
+Test dışında, **her hesapta** rota teslim edilmeden önce iki denetim sıfırdan
+çalışır:
+
+- `auditPath` — A*'ın ham yolu: her hücre, o hücrenin tüm pay komşuluğu, her
+  diyagonal geçişin iki yanı, ve yolun gerçekten istenen başlangıç/varış
+  hücrelerini birleştirdiği.
+- `auditSegments` — düzleştirilmiş bacaklar: iki dönüş noktası arasındaki düz
+  çizginin geçtiği **her** hücre (`lineCells`, köşe geçişlerinde iki yan hücre
+  dahil) aynı pay komşuluğu kuralıyla.
+
+Herhangi biri geçmezse rota **verilmez**, hata döner. Bu bilinçli bir tekrardır:
+arama motorundaki ya da düzleştirmedeki bir hata sessizce geçerli görünen bir
+rota üretemesin diye.
+
+### Düzleştirme neden güvenli
+
+Görüş hattı düzleştirmesi (`straighten`) bir bacağı ancak düz çizginin geçtiği
+her hücre, kıyı/engel payı dahil, geçilebilirse birleştirir. Geçilebilirlik
+`passableCells` ile hesaplanır — A*'ın kullandığı aynı dizi. Yani düz bacak,
+yerine geçtiği merdivenin kullanmadığı hiçbir hücreye girmez; yalnızca
+merdivenin zaten içinde kaldığı geçilebilir alanı daha kısa keser. Bencik →
+Palamutbükü'nde 117 nokta 10'a, 28,67 nm 27,18 nm'e indi; en sığ model
+derinliği değişmedi (12,28 m).
 
 ## 5. Kasıtlı değişiklikler (iOS 0.2'ye göre)
 
@@ -86,6 +107,8 @@ arama motorundaki bir hata sessizce geçerli görünen bir rota üretemesin diye
 | `coastMask` içinde satır bandı indeksi | Yalnızca tarama çizgisini kesemeyecek parçaları atlar; regresyon maskesi bayt bayt aynı kalır. |
 | `passableCells` paylaşıldı | Aynı kod hem rota aramasında hem teşhiste; ikisi asla ayrışamaz. |
 | Kullanılamayan nokta teşhisi | Yeni. Öneri **deniz yoluyla** aranır (kuş uçuşu arama bir kıstakta yanlış körfezi önerebiliyordu) ve nokta kullanıcı onaylamadan taşınmaz. |
+| Görüş hattı düzleştirmesi | Yeni. Yalnızca geçilebilir hücrelerden geçen düz bacaklar; ayrı denetim (`auditSegments`). Ham yol ve regresyon değişmez. |
+| Doğrulanmamış uç etap | Yeni, yalnızca arayüzde. Motor asla doğrulanmamış hücreden rota geçirmez; kullanıcı, gerçek ucuyla en yakın uygun su arasındaki parçayı **açıkça etiketli** kırmızı kesikli çizgi olarak ekleyebilir. Bu parça hiçbir yerde "doğrulandı" diye geçmez. |
 
 ## 6. Yapılmamış olan
 
