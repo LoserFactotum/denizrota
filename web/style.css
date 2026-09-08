@@ -286,6 +286,10 @@ button { cursor: pointer; }
   background: var(--paper); font-size: 14px; font-weight: 600; color: var(--ink);
 }
 .chip.danger { color: var(--red); border-color: var(--red); }
+.chip.accent { border-color: var(--teal); color: var(--teal-strong); }
+.here-row { margin: 0 0 8px; }
+.here-row .chip { flex: 1; }
+.gps-chip { cursor: pointer; }
 .chip:disabled { opacity: .45; }
 
 .primary {

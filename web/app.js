@@ -59,6 +59,7 @@ const state = {
   // cizilir. Buradaki degerler o yerine gecen su noktalaridir.
   unverifiedEnds: { start: null, end: null },
   gridMode: null,        // null | 'depth' | 'cells'
+  pendingHere: null,     // 'start' | 'add' — GPS gelince yapilacak konum islemi
   // Seyirde gidilen gercek iz. Cihazda saklanir; sayfa yenilense de kaybolmaz.
   track: store.loadTrack(),
   busy: false,
@@ -575,9 +576,8 @@ function render() {
   map.setPoints(state.points, { draggable: !state.tracking });
   map.setRoute(state.computed ? state.computed.points : state.points, { computed: !!state.computed });
   map.setUnverified(unverifiedSegments());
-  const hasFix = !!state.position && !state.tracking;
-  el.hereStart.disabled = !hasFix;
-  el.hereAdd.disabled = !hasFix;
+  el.hereStart.disabled = !!state.tracking;
+  el.hereAdd.disabled = !!state.tracking;
   if (!state.computed) el.unverifiedNote.hidden = true;
 }
 
@@ -929,9 +929,12 @@ function onPosition() {
     el.gpsChip.textContent = 'Yeterli dogrulukta GPS bekleniyor';
     map.setBoat(null);
   }
-  const hasFix = !!fix && !state.tracking;
-  el.hereStart.disabled = !hasFix;
-  el.hereAdd.disabled = !hasFix;
+  if (fix && state.pendingHere && !state.tracking) {
+    const action = state.pendingHere;
+    state.pendingHere = null;
+    if (action === 'start') useHereAsStart();
+    else addPoint(currentPoint(`Konumum ${clock(new Date())}`));
+  }
   if (state.tracking) renderTracking();
 }
 
@@ -1096,7 +1099,7 @@ function currentPoint(name) {
   return { name, latitude: fix.latitude, longitude: fix.longitude };
 }
 
-el.hereStart.addEventListener('click', () => {
+function useHereAsStart() {
   const here = currentPoint('Konumum');
   if (!here || state.tracking) return;
   // Ilk nokta zaten konum ise guncelle, degilse basa ekle.
@@ -1104,14 +1107,28 @@ el.hereStart.addEventListener('click', () => {
   else state.points.unshift(here);
   invalidateComputed();
   render();
-  map.fit(state.points);
-});
+  map.fit(state.points.length > 1 ? state.points : [here]);
+}
 
-el.hereAdd.addEventListener('click', () => {
-  const here = currentPoint(`Konumum ${new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}`);
-  if (!here || state.tracking) return;
-  addPoint(here);
-});
+/** GPS henuz yoksa izin ister, bekler ve konum gelir gelmez islemi yapar. */
+function whenLocated(action) {
+  if (state.tracking) return;
+  if (state.position) {
+    if (action === 'start') useHereAsStart();
+    else addPoint(currentPoint(`Konumum ${clock(new Date())}`));
+    return;
+  }
+  state.pendingHere = action;
+  startWatching();
+  el.gpsChip.classList.remove('live');
+  el.gpsChip.textContent = 'Konum bekleniyor — gelince eklenecek';
+}
+
+el.hereStart.addEventListener('click', () => whenLocated('start'));
+el.hereAdd.addEventListener('click', () => whenLocated('add'));
+// GPS cipine dokunmak da konumu baslangic yapar.
+el.gpsChip.addEventListener('click', () => whenLocated('start'));
+el.gpsChip.title = 'Konumumu baslangic yap';
 
 el.locate.addEventListener('click', () => {
   startWatching();
