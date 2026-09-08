@@ -46,6 +46,11 @@
     <button id="grid-button" class="map-button" type="button" aria-label="Hesap alanini goster" title="Hesap alani" disabled>▦</button>
   </div>
 
+  <div id="legend" class="legend" hidden>
+    <div class="legend-title">Derinlik payi (tekneye gore)</div>
+    <div id="legend-scale" class="legend-scale"></div>
+  </div>
+
   <div id="gps-chip" class="gps-chip">GPS bekleniyor</div>
 
   <div id="alert-strip" class="alert-strip" hidden role="alert"></div>
@@ -73,6 +78,11 @@
 
       <ol id="point-list" class="point-list" aria-label="Rota noktalari"></ol>
       <p id="point-hint" class="hint">Haritaya dokunarak veya yukaridan arayarak baslangic ve varis ekleyin.</p>
+      <div class="row-buttons">
+        <button id="here-start" class="chip" type="button" disabled>⌖ Konumum baslangic</button>
+        <button id="here-add" class="chip" type="button" disabled>⌖ Konumumu ekle</button>
+      </div>
+      <div id="unverified-note" class="unverified-note" hidden></div>
 
       <div class="metrics" id="metrics">
         <div class="metric"><span class="metric-label">MESAFE</span><b id="m-distance">—</b><span class="metric-unit">deniz mili</span></div>
@@ -112,11 +122,21 @@
         <button id="gpx-export" class="chip" type="button">GPX indir</button>
         <button id="gpx-import" class="chip" type="button">GPX yukle</button>
         <button id="share-button" class="chip" type="button">Baglanti kopyala</button>
+        <button id="track-export" class="chip" type="button" hidden>Izi indir</button>
+        <button id="track-clear" class="chip danger" type="button" hidden>Izi sil</button>
         <input id="gpx-file" type="file" accept=".gpx,application/gpx+xml,text/xml" hidden>
       </div>
     </div>
 
     <div class="tab-body" data-panel="boat" hidden>
+      <label class="switch-row">
+        <span>Tekne</span>
+        <select id="boat-preset">
+          <option value="dufour470">Dufour 470 · standart salma</option>
+          <option value="dufour470-shoal">Dufour 470 · sig salma</option>
+          <option value="custom">Ozel</option>
+        </select>
+      </label>
       <p class="hint">Olculer kendi tekneniz icindir. Aranan derinlik = su cekimi + omurga alti pay + model payi + su seviyesi dususu.</p>
       <div id="boat-fields" class="fields"></div>
       <div class="required-depth">Aranan model derinligi: <b id="required-depth">7,5 m</b></div>

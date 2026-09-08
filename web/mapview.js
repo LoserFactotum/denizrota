@@ -5,6 +5,7 @@
 const OSM_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 const SEAMARK_URL = 'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png';
 
+// Hucre durumu katmani: neyin neden kapali oldugunu gosterir.
 const MASK_COLOURS = {
   0: [90, 90, 100, 150],   // bilinmiyor
   1: [0, 150, 160, 40],    // derinlik uygun
@@ -12,6 +13,46 @@ const MASK_COLOURS = {
   4: [210, 40, 50, 120],   // kiyi / engel
   8: [245, 145, 0, 130],   // sig
 };
+
+// Derinlik katmani: deniz haritasi mantigi — sig koyu, derin acik. Teknenin
+// gecemeyecegi derinlik kirmizi, hemen ustundeki dar bant turuncu.
+const DEPTH_BANDS = [
+  { over: 60, colour: [232, 244, 251, 60] },
+  { over: 30, colour: [176, 214, 238, 80] },
+  { over: 15, colour: [116, 180, 220, 100] },
+  { over: 5, colour: [56, 138, 196, 115] },
+  { over: 0, colour: [26, 101, 163, 130] },
+];
+// Kiyi/engel ile sig su ayri kirmizilar: biri "burada kara/kaya var", digeri
+// "su var ama teknene yetmez". Ikisi de gecilmez, ama denizci farki bilmek ister.
+const OBSTACLE_COLOUR = [140, 26, 26, 135];
+const UNSAFE_COLOUR = [214, 60, 52, 130];
+const MARGINAL_COLOUR = [242, 155, 46, 135];
+const UNKNOWN_COLOUR = [92, 92, 102, 150];
+
+export const DEPTH_LEGEND = [
+  { label: 'kiyi/engel', colour: 'rgb(140,26,26)' },
+  { label: 'sig', colour: 'rgb(214,60,52)' },
+  { label: 'sinirda', colour: 'rgb(242,155,46)' },
+  { label: '+0 m', colour: 'rgb(26,101,163)' },
+  { label: '+5 m', colour: 'rgb(56,138,196)' },
+  { label: '+15 m', colour: 'rgb(116,180,220)' },
+  { label: '+30 m', colour: 'rgb(176,214,238)' },
+  { label: '+60 m', colour: 'rgb(232,244,251)' },
+  { label: 'bilinmiyor', colour: 'rgb(92,92,102)' },
+];
+
+/** Renk, teknenin gereksiniminin USTUNDEKI paya gore secilir. */
+function depthColour(depth, mask, required) {
+  if (mask === 2) return [0, 0, 0, 0];
+  if (mask === 4) return OBSTACLE_COLOUR;
+  if (mask === 0 || !Number.isFinite(depth)) return UNKNOWN_COLOUR;
+  if (depth < required) return UNSAFE_COLOUR;
+  const spare = depth - required;
+  if (spare < 2) return MARGINAL_COLOUR;
+  for (const band of DEPTH_BANDS) if (spare > band.over) return band.colour;
+  return DEPTH_BANDS[DEPTH_BANDS.length - 1].colour;
+}
 
 function mercatorY(latitude) {
   return Math.log(Math.tan(Math.PI / 4 + latitude * Math.PI / 360));
@@ -49,6 +90,9 @@ export class MapView {
     this.boatMarker = null;
     this.accuracyCircle = null;
     this.gridOverlay = null;
+    this.unverifiedLines = null;
+    this.soundingLayer = null;
+    this.soundingGrid = null;
     this.searchMarker = null;
 
     this.onMapClick = onMapClick;
@@ -130,6 +174,16 @@ export class MapView {
     }).addTo(this.map);
   }
 
+  /** Derinlik kontrolu yapilmamis parcalar: kirmizi, kesikli, karistirilmaz. */
+  setUnverified(segments) {
+    if (this.unverifiedLines) { this.map.removeLayer(this.unverifiedLines); this.unverifiedLines = null; }
+    if (!segments || !segments.length) return;
+    this.unverifiedLines = L.layerGroup(segments.map(([a, b]) => L.polyline(
+      [[a.latitude, a.longitude], [b.latitude, b.longitude]],
+      { color: '#c0392b', weight: 4, dashArray: '4 8', opacity: 0.95, lineCap: 'butt' },
+    ).bindTooltip('Dogrulanmamis etap — derinlik kontrolu yok', { sticky: true }))).addTo(this.map);
+  }
+
   setGuidance(from, to) {
     if (this.guidanceLine) { this.map.removeLayer(this.guidanceLine); this.guidanceLine = null; }
     if (!from || !to) return;
@@ -164,11 +218,17 @@ export class MapView {
     }
   }
 
-  /** Hesap alanini renkli katman olarak gosterir (Mercator'a yeniden orneklenir). */
-  setGrid(grid) {
+  /**
+   * Hesap alanini katman olarak gosterir.
+   * mode 'depth' derinlik bantlari, 'cells' hucre durumu, null kapali.
+   * Hesap gridi metrik esdikdortgensel, harita Mercator: satirlar yeniden orneklenir.
+   */
+  setGrid(grid, mode = 'depth') {
     if (this.gridOverlay) { this.map.removeLayer(this.gridOverlay); this.gridOverlay = null; }
-    if (!grid) return;
-    const { bounds, mask } = grid;
+    this.soundingGrid = null;
+    this.refreshSoundings();
+    if (!grid || !mode) return;
+    const { bounds, mask, depths, required } = grid;
     const { rows, columns, north, south, west, east, cell, metersPerLatitudeDegree } = bounds;
 
     const canvas = document.createElement('canvas');
@@ -188,7 +248,10 @@ export class MapView {
       const sourceBase = sourceRow * columns;
       const outBase = outRow * columns * 4;
       for (let col = 0; col < columns; col++) {
-        const colour = MASK_COLOURS[mask[sourceBase + col]] ?? MASK_COLOURS[0];
+        const i = sourceBase + col;
+        const colour = mode === 'depth'
+          ? depthColour(depths ? depths[i] : NaN, mask[i], required)
+          : (MASK_COLOURS[mask[i]] ?? MASK_COLOURS[0]);
         const offset = outBase + col * 4;
         data[offset] = colour[0];
         data[offset + 1] = colour[1];
@@ -200,6 +263,57 @@ export class MapView {
     this.gridOverlay = L.imageOverlay(canvas.toDataURL('image/png'), [[south, west], [north, east]], {
       opacity: 1, interactive: false, className: 'grid-overlay',
     }).addTo(this.map);
+
+    if (mode === 'depth' && depths) {
+      this.soundingGrid = grid;
+      this.refreshSoundings();
+    }
+  }
+
+  /**
+   * Iskandil rakamlari: yakinlastirinca ekranda seyrek bir izgara uzerinde
+   * derinlik degerleri yazilir. Deniz haritalarindaki nokta derinliklerin
+   * karsiligi; katman rengi bandi, rakam kesin degeri verir.
+   */
+  refreshSoundings() {
+    if (!this.soundingLayer) {
+      this.soundingLayer = L.layerGroup().addTo(this.map);
+      this.map.on('moveend zoomend', () => this.refreshSoundings());
+    }
+    this.soundingLayer.clearLayers();
+    const grid = this.soundingGrid;
+    if (!grid || this.map.getZoom() < 12) return;
+    const { bounds, mask, depths } = grid;
+    const size = this.map.getSize();
+    const STEP = 76; // ekranda ~76 px araliklarla
+    const seen = new Set();
+    for (let py = 30; py < size.y - 20; py += STEP) {
+      for (let px = 26; px < size.x - 26; px += STEP) {
+        const ll = this.map.containerPointToLatLng([px, py]);
+        const x = (ll.lng - bounds.west) * bounds.metersPerLongitudeDegree;
+        const y = (ll.lat - bounds.south) * bounds.metersPerLatitudeDegree;
+        if (!(x >= 0 && y >= 0 && x < bounds.columns * bounds.cell && y < bounds.rows * bounds.cell)) continue;
+        const i = (bounds.rows - 1 - Math.floor(y / bounds.cell)) * bounds.columns + Math.floor(x / bounds.cell);
+        if (seen.has(i)) continue;
+        seen.add(i);
+        if (mask[i] === 2) continue;
+        const depth = depths[i];
+        let text = '?';
+        if (Number.isFinite(depth) && mask[i] !== 0) {
+          if (depth <= 0.5) text = '0';
+          else text = depth < 10 ? depth.toFixed(1).replace('.', ',') : String(Math.round(depth));
+        }
+        const unsafe = !Number.isFinite(depth) || depth < grid.required;
+        this.soundingLayer.addLayer(L.marker(ll, {
+          interactive: false,
+          icon: L.divIcon({
+            className: '',
+            html: `<span class="sounding${unsafe ? ' unsafe' : ''}">${text}</span>`,
+            iconSize: [30, 14], iconAnchor: [15, 7],
+          }),
+        }));
+      }
+    }
   }
 
   fit(points, padding = [40, 40]) {

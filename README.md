@@ -20,16 +20,29 @@ Kurulum, Mac ve Xcode gerekmez.
 - **Yer arama** — koy, liman, burun, ada adı yazarsınız (Nominatim + Photon,
   Türkçe ad eşleşmesine göre sıralanır). Koordinat veya Google Maps bağlantısı
   da yapıştırabilirsiniz: `36.6661, 27.5105`, `36 40.5 N 27 30.2 E`,
-  `https://www.google.com/maps/@36.674,27.504,15z`.
-- **Rota hesabı** — noktalar arası, teknenizin ölçülerine uyan geçişi arar.
+  `https://www.google.com/maps/@36.674,27.504,15z`. Bulunduğunuz yeri tek
+  dokunuşla başlangıç yapabilirsiniz.
+- **Rota hesabı** — noktalar arası, teknenizin ölçülerine uyan geçişi arar,
+  sonra bir denizcinin dümen tutacağı düz bacaklara indirger (görüş hattı
+  düzleştirmesi; düz çizginin geçtiği her hücre yeniden denetlenir).
+- **Derinlik katmanı** — teknenizin gereksinimine göre renklendirilmiş bantlar,
+  yakınlaştırınca iskandil rakamları; geçilmez sığlık kırmızı, sınırdaki
+  derinlik turuncu. İkinci dokunuşta hücre durumu (kara / kıyı-engel / bilinmiyor).
 - **Neden olmadığını söyler** — bir nokta kullanılamıyorsa sebebini, en büyük
   uygun kıyı payını ve **deniz yoluyla** en yakın uygun suyu gösterir. Noktayı
   kendiliğinden taşımaz; önce haritada gösterip onay ister.
-- **Hesap alanını gösterir** — hangi hücre uygun, sığ, engelli ya da bilinmiyor.
+- **Doğrulanmamış uç etap** — model dar bir koyun içini çözemiyorsa, koyun
+  başından açık suya kadar olan parçayı **kırmızı kesikli** ve açıkça
+  "derinlik kontrolü yok" etiketiyle ekleyebilirsiniz. Mesafeye girer, GPX'e
+  notla gider, seyirde sürekli uyarır — ama asla doğrulanmış gibi gösterilmez.
 - **Seyir takibi** — GPS yer hızı, kalan mesafe/süre, varış saati, kerteriz,
   rotadan sapma uyarısı, sığ/engelli alan uyarısı, ekranı açık tutma.
+- **İz kaydı** — seyir boyunca gidilen gerçek iz cihazda saklanır ve GPX
+  `<trk>` olarak indirilir; sayfa yenilense de kaybolmaz.
 - **GPX indirir/yükler**, rotaları cihazda saklar, paylaşılabilir bağlantı üretir.
 - **Varış gün batımından sonra mı** — yerel hesapla söyler.
+- **Tekne ön ayarları** — Dufour 470 (standart / sığ salma) hazır; her ölçü
+  elle değiştirilebilir.
 - **Çevrimdışı** — uygulama kabuğu ve daha önce görülmüş harita döşemeleri
   önbelleğe alınır; hesaplanmış rota ve takip çekim olmadan da çalışır.
 
@@ -50,9 +63,12 @@ ve dar geçişler o kadar iyi çözülür).
 3. **Pay.** Seçtiğiniz kıyı/engel uzaklığı kadar kare komşuluk da açık olmalıdır.
 4. **Arama.** Sekiz komşulu A*; köşe kesme yok, uçlar kaydırılmaz, rota
    bulunamazsa koşullar gevşetilmez ve düz çizgiye düşülmez.
-5. **Bağımsız denetim.** Yol bulunduktan sonra her hücre, tüm pay alanı ve her
-   diyagonal geçişin iki yanı **sıfırdan yeniden** denetlenir. Denetim geçmezse
-   rota verilmez.
+5. **Düzleştirme.** Grid merdiveni, düz çizginin geçtiği **her** hücre payıyla
+   birlikte açık olduğu sürece tek bacağa indirgenir. Sonuç daha kısa ve dümen
+   tutulabilir; asla merdivenden daha az güvenli değil.
+6. **Bağımsız denetim.** Hem ham yol hem düzleştirilmiş bacaklar **sıfırdan
+   yeniden** denetlenir: her hücre, tüm pay alanı, her geçişin iki yanı.
+   Denetim geçmezse rota verilmez.
 
 Aranan derinlik = su çekimi + omurga altı pay + model payı + su seviyesi düşüşü.
 
@@ -113,7 +129,12 @@ portlandı:
 
 Ayrıntı: [`docs/DOGRULAMA.md`](docs/DOGRULAMA.md).
 
-## Kaynaklar ve lisans
+## Lisans
+
+Kod [MIT](LICENSE) lisanslıdır. Kullanılan veriler kendi lisanslarına tabidir
+(aşağıda) ve depoya dahil değildir.
+
+## Kaynaklar
 
 - [EMODnet Bathymetry](https://emodnet.ec.europa.eu/en/bathymetry) — derinlik modeli
 - [GEBCO](https://www.gebco.net/data-products/gridded-bathymetry-data) — modelin dolgu kaynağı

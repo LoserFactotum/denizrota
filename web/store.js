@@ -67,6 +67,16 @@ export function loadSettings(fallback) {
 
 export function saveSettings(settings) { return write(SETTINGS_KEY, settings); }
 
+const TRACK_KEY = 'denizrota.track.v1';
+
+export function loadTrack() {
+  const rows = read(TRACK_KEY, []);
+  if (!Array.isArray(rows)) return [];
+  return rows.filter(p => Number.isFinite(p?.latitude) && Number.isFinite(p?.longitude) && Number.isFinite(p?.at));
+}
+
+export function saveTrack(track) { return write(TRACK_KEY, track); }
+
 // --- paylasilabilir baglanti -------------------------------------------------
 // Rota, adres cubugunda kodlanir: link atarsan karsi taraf ayni rotayi acar.
 

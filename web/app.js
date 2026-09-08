@@ -1,7 +1,7 @@
 // DenizRota web — arayuz ve akis.
 // Hesap web worker'da calisir; bu dosya yalnizca gosterim, giris ve seyir takibi.
 
-import { MapView } from './mapview.js';
+import { MapView, DEPTH_LEGEND } from './mapview.js';
 import { searchPlaces, parseCoordinates, reverseName } from './geocode.js';
 import * as store from './store.js';
 import { routeToGPX, parseGPX, download } from './gpx.js';
@@ -13,7 +13,23 @@ import {
 
 // ------------------------------------------------------------------ sabitler
 
-const DEFAULT_BOAT = { draft: 1.5, underKeel: 1.0, modelAllowance: 5.0, waterLevelDrop: 0.0, horizontalBuffer: 150.0 };
+// Tekne on ayarlari. Su cekimi degerleri uretici brosurunden; kendi teknenizin
+// belgesindeki degeri girin — salma secenegine gore degisir.
+const BOAT_PRESETS = {
+  dufour470: {
+    label: 'Dufour 470 · standart salma',
+    draft: 2.2, underKeel: 1.0, modelAllowance: 5.0, waterLevelDrop: 0.3, horizontalBuffer: 150,
+    beam: 4.74,
+  },
+  'dufour470-shoal': {
+    label: 'Dufour 470 · sig salma',
+    draft: 1.8, underKeel: 1.0, modelAllowance: 5.0, waterLevelDrop: 0.3, horizontalBuffer: 150,
+    beam: 4.74,
+  },
+};
+const BOAT_KEYS = ['draft', 'underKeel', 'modelAllowance', 'waterLevelDrop', 'horizontalBuffer'];
+const pick = (preset) => Object.fromEntries(BOAT_KEYS.map(k => [k, preset[k]]));
+const DEFAULT_BOAT = pick(BOAT_PRESETS.dufour470);
 
 const BOAT_FIELDS = [
   { key: 'draft', label: 'Su cekimi', hint: 'Teknenin su altindaki en derin noktasi', min: 0.1, max: 15, step: 0.1, unit: 'm' },
@@ -36,8 +52,15 @@ const state = {
   points: [],            // kullanicinin noktalari (anchor)
   speedKnots: 5,
   boat: store.loadBoat(DEFAULT_BOAT),
-  settings: store.loadSettings({ seamarks: true, resolution: 'auto' }),
+  settings: store.loadSettings({ seamarks: true, resolution: 'auto', boatPreset: 'dufour470' }),
   computed: null,        // worker sonucu
+  // Kullanicinin gercek ucu modelce dogrulanamiyorsa (dar koy gibi), rota en
+  // yakin uygun sudan hesaplanir ve aradaki parca DOGRULANMAMIS etap olarak
+  // cizilir. Buradaki degerler o yerine gecen su noktalaridir.
+  unverifiedEnds: { start: null, end: null },
+  gridMode: null,        // null | 'depth' | 'cells'
+  // Seyirde gidilen gercek iz. Cihazda saklanir; sayfa yenilense de kaybolmaz.
+  track: store.loadTrack(),
   busy: false,
   tracking: null,        // {targetIndex, startedAt}
   position: null,
@@ -74,7 +97,10 @@ const el = {
   trackButton: $('track-button'),
   save: $('save-button'), routes: $('routes-button'),
   gpxExport: $('gpx-export'), gpxImport: $('gpx-import'), gpxFile: $('gpx-file'), share: $('share-button'),
+  trackExport: $('track-export'), trackClear: $('track-clear'),
   boatFields: $('boat-fields'), requiredDepth: $('required-depth'), resolution: $('resolution'),
+  boatPreset: $('boat-preset'), hereStart: $('here-start'), hereAdd: $('here-add'),
+  unverifiedNote: $('unverified-note'), legend: $('legend'), legendScale: $('legend-scale'),
   provenance: $('provenance'),
   trackTarget: $('track-target'), trackSub: $('track-sub'), trackStop: $('track-stop'),
   tRemaining: $('t-remaining'), tSpeed: $('t-speed'), tEta: $('t-eta'), tArrival: $('t-arrival'),
@@ -132,17 +158,48 @@ const map = new MapView('map', {
 // --------------------------------------------------------------- gecerlilik
 
 function invalidateComputed() {
+  state.unverifiedEnds = { start: null, end: null };
   if (state.computed) {
     state.computed = null;
-    state.showGrid = false;
+    state.gridMode = null;
     map.setGrid(null);
+    el.gridButton.classList.remove('active');
+    el.legend.hidden = true;
     stopTracking(true);
   }
 }
 
+/** Hesaba giden uclar: dogrulanamayan gercek uc yerine en yakin uygun su. */
+function effectiveAnchors() {
+  const anchors = state.points.map(p => ({ ...p }));
+  if (anchors.length >= 2) {
+    if (state.unverifiedEnds.start) anchors[0] = { ...state.unverifiedEnds.start, name: anchors[0].name };
+    if (state.unverifiedEnds.end) anchors[anchors.length - 1] = { ...state.unverifiedEnds.end, name: anchors[anchors.length - 1].name };
+  }
+  return anchors;
+}
+
+/** Ekranda ve seyirde kullanilan tam nokta listesi; dogrulanmamis uclar dahil. */
+function displayedPoints() {
+  if (!state.computed) return state.points;
+  const points = [...state.computed.points];
+  if (state.unverifiedEnds.start) points.unshift({ ...state.points[0], unverified: true });
+  if (state.unverifiedEnds.end) points.push({ ...state.points[state.points.length - 1], unverified: true });
+  return points;
+}
+
+/** [a, b] ciftleri: derinlik kontrolu YAPILMAMIS parcalar. */
+function unverifiedSegments() {
+  if (!state.computed) return [];
+  const c = state.computed.points;
+  const segments = [];
+  if (state.unverifiedEnds.start) segments.push([state.points[0], c[0]]);
+  if (state.unverifiedEnds.end) segments.push([c[c.length - 1], state.points[state.points.length - 1]]);
+  return segments;
+}
+
 function plannedSeconds() {
-  const points = state.computed ? state.computed.points : state.points;
-  return etaSeconds(routeDistanceMeters(points), mpsFromKnots(state.speedKnots));
+  return etaSeconds(routeDistanceMeters(displayedPoints()), mpsFromKnots(state.speedKnots));
 }
 
 // ------------------------------------------------------------------ noktalar
@@ -399,7 +456,7 @@ function wireDragAndDrop() {
 }
 
 function renderMetrics() {
-  const points = state.computed ? state.computed.points : state.points;
+  const points = displayedPoints();
   const metres = routeDistanceMeters(points);
   const seconds = plannedSeconds();
   el.mDistance.textContent = points.length > 1 ? nm(metres) : '—';
@@ -430,8 +487,18 @@ function renderResult() {
   el.modeBadge.classList.toggle('verified', !!computed);
   if (!computed) { el.legList.innerHTML = ''; return; }
 
-  el.resultSummary.textContent = `${nm(computed.distanceM)} deniz mili · en sig model degeri `
-    + `${num(computed.shallowestModelDepth, 1)} m (gereken ${num(computed.minimumDepth, 1)} m)`;
+  const unverified = unverifiedSegments();
+  const unverifiedM = unverified.reduce((sum, [a, b]) => sum + distanceMeters(a.latitude, a.longitude, b.latitude, b.longitude), 0);
+  el.resultSummary.textContent = `${nm(computed.distanceM)} deniz mili dogrulandi · en sig model degeri `
+    + `${num(computed.shallowestModelDepth, 1)} m (gereken ${num(computed.minimumDepth, 1)} m)`
+    + (unverified.length ? ` · +${nm(unverifiedM)} nm dogrulanmamis` : '');
+  el.unverifiedNote.hidden = !unverified.length;
+  if (unverified.length) {
+    const where = [state.unverifiedEnds.start ? 'baslangicta' : null, state.unverifiedEnds.end ? 'variste' : null]
+      .filter(Boolean).join(' ve ');
+    el.unverifiedNote.textContent = `Kirmizi kesikli parca (${where}, ${nm(unverifiedM)} nm) derinlik kontrolunden GECMEDI: `
+      + 'model orayi cozemiyor. Bu parcayi gozle, haritayla ve iskandille seyredin.';
+  }
 
   el.legList.innerHTML = '';
   computed.legs.forEach((leg, index) => {
@@ -440,7 +507,7 @@ function renderResult() {
     const left = document.createElement('span');
     left.textContent = `${index + 1}. ${leg.from} → ${leg.to}`;
     const right = document.createElement('b');
-    right.textContent = `${nf(2).format(leg.gridDistanceM / 1852)} nm · en sig ${num(leg.shallowestModelDepth, 1)} m`;
+    right.textContent = `${nf(2).format(leg.gridDistanceM / 1852)} nm · ${leg.turns ?? '—'} donus · en sig ${num(leg.shallowestModelDepth, 1)} m`;
     row.append(left, right);
     el.legList.append(row);
   });
@@ -505,19 +572,40 @@ function render() {
   el.requiredDepth.textContent = `${num(
     state.boat.draft + state.boat.underKeel + state.boat.modelAllowance + state.boat.waterLevelDrop, 1)} m`;
 
-  const shown = state.computed ? state.computed.points : state.points;
-  map.setPoints(state.points, {
-    activeIndex: state.tracking ? nearestAnchorIndex() : null,
-    draggable: !state.tracking,
-  });
-  map.setRoute(shown, { computed: !!state.computed });
+  map.setPoints(state.points, { draggable: !state.tracking });
+  map.setRoute(state.computed ? state.computed.points : state.points, { computed: !!state.computed });
+  map.setUnverified(unverifiedSegments());
+  const hasFix = !!state.position && !state.tracking;
+  el.hereStart.disabled = !hasFix;
+  el.hereAdd.disabled = !hasFix;
+  if (!state.computed) el.unverifiedNote.hidden = true;
 }
-
-function nearestAnchorIndex() { return null; }
 
 // ------------------------------------------------------------------ tekne
 
+function applyPreset(key) {
+  const preset = BOAT_PRESETS[key];
+  if (!preset) return;
+  state.boat = pick(preset);
+  store.saveBoat(state.boat);
+  state.settings.boatPreset = key;
+  store.saveSettings(state.settings);
+  invalidateComputed();
+  renderBoatFields();
+  render();
+}
+
+el.boatPreset.addEventListener('change', () => {
+  if (el.boatPreset.value === 'custom') {
+    state.settings.boatPreset = 'custom';
+    store.saveSettings(state.settings);
+    return;
+  }
+  applyPreset(el.boatPreset.value);
+});
+
 function renderBoatFields() {
+  el.boatPreset.value = state.settings.boatPreset ?? 'custom';
   el.boatFields.innerHTML = '';
   for (const field of BOAT_FIELDS) {
     const row = document.createElement('div');
@@ -542,6 +630,9 @@ function renderBoatFields() {
       const clamped = Math.min(field.max, Math.max(field.min, Math.round(value / field.step) * field.step));
       state.boat[field.key] = Number(clamped.toFixed(3));
       store.saveBoat(state.boat);
+      // Elle degistirilen olcu artik bir on ayar degil.
+      state.settings.boatPreset = 'custom';
+      store.saveSettings(state.settings);
       invalidateComputed();
       renderBoatFields();
       render();
@@ -595,7 +686,10 @@ function ensureWorker() {
         depths: message.depths,
       };
       render();
-      map.fit(message.points);
+      map.fit(displayedPoints());
+      // Hesap bitince derinlik katmani kendiliginden acilir: sonucu okumanin
+      // en hizli yolu, rotanin hangi renkten gectigini gormek.
+      setGridMode('depth');
       return;
     }
     if (message.type === 'error') {
@@ -662,6 +756,37 @@ function showCalcError(message) {
     fixes.append(button);
   }
 
+  // Uc noktalarda ikinci secenek: gercek noktayi koru, rotayi en yakin uygun
+  // sudan hesapla, aradaki parcayi DOGRULANMAMIS olarak ciz. Ara noktalarda
+  // anlamsiz — oradan gecmek gerekir, gozle seyredilecek bir kiyi degil.
+  if (detail?.diagnosis?.nearest && detail.blocked && state.points.length >= 2) {
+    const anchors = effectiveAnchors();
+    const same = (a, b) => Math.abs(a.latitude - b.latitude) < 1e-9 && Math.abs(a.longitude - b.longitude) < 1e-9;
+    const isStart = same(anchors[0], detail.blocked);
+    const isEnd = same(anchors[anchors.length - 1], detail.blocked);
+    if (isStart || isEnd) {
+      const near = detail.diagnosis.nearest;
+      const button = document.createElement('button');
+      button.className = 'chip danger';
+      button.type = 'button';
+      button.textContent = isStart ? 'Buradan dogrulanmamis etapla basla' : 'Buraya dogrulanmamis etapla var';
+      button.addEventListener('click', () => {
+        confirmAction(
+          'Derinlik kontrolu olmayan parca eklensin mi?',
+          `${isStart ? 'Baslangictan' : 'Varisa'} en yakin uygun suya kadar olan ${Math.round(near.distanceM)} m `
+          + 'kirmizi kesikli cizilir ve mesafeye eklenir, ama derinlik ve engel acisindan DOGRULANMAZ. '
+          + 'O parcayi gozle, haritayla ve iskandille seyretmeniz gerekir.',
+          () => {
+            if (isStart) state.unverifiedEnds.start = { latitude: near.latitude, longitude: near.longitude };
+            else state.unverifiedEnds.end = { latitude: near.latitude, longitude: near.longitude };
+            el.calcError.hidden = true;
+            calculate();
+          });
+      });
+      fixes.append(button);
+    }
+  }
+
   if (Number.isFinite(detail?.diagnosis?.usableBufferM) && detail.diagnosis.usableBufferM < state.boat.horizontalBuffer) {
     const button = document.createElement('button');
     button.className = 'chip';
@@ -696,8 +821,8 @@ function showCalcError(message) {
 function calculate() {
   if (state.points.length < 2 || state.busy) return;
   state.busy = true;
-  state.showGrid = false;
-  map.setGrid(null);
+  state.computed = null;
+  setGridMode(null);
   el.calcError.hidden = true;
   el.progress.hidden = false;
   el.progressFill.style.width = '5%';
@@ -705,7 +830,7 @@ function calculate() {
   render();
   ensureWorker().postMessage({
     type: 'plan',
-    anchors: state.points.map(p => ({ ...p })),
+    anchors: effectiveAnchors(),
     boat: { ...state.boat },
     cellOverride: state.settings.resolution === 'auto' ? undefined : Number(state.settings.resolution),
   });
@@ -771,8 +896,30 @@ function startWatching() {
   );
 }
 
+const TRACK_MIN_METRES = 8;
+
+/** Seyirdeyken her kullanilabilir konumu ize ekler; kipirdanmayi eler. */
+function recordTrackPoint(fix) {
+  const last = state.track[state.track.length - 1];
+  if (last && distanceMeters(last.latitude, last.longitude, fix.latitude, fix.longitude) < TRACK_MIN_METRES) return;
+  state.track.push({ latitude: fix.latitude, longitude: fix.longitude, at: fix.at, speed: fix.speed });
+  if (state.track.length % 10 === 0) store.saveTrack(state.track);
+  renderTrackButtons();
+}
+
+function renderTrackButtons() {
+  const n = state.track.length;
+  el.trackExport.hidden = n < 2;
+  el.trackClear.hidden = n < 2;
+  if (n >= 2) {
+    const metres = routeDistanceMeters(state.track);
+    el.trackExport.textContent = `Izi indir (${nm(metres)} nm)`;
+  }
+}
+
 function onPosition() {
   const fix = state.position;
+  if (fix && state.tracking) recordTrackPoint(fix);
   if (fix) {
     el.gpsChip.classList.add('live');
     el.gpsChip.textContent = `GPS ±${Math.ceil(fix.accuracy)} m`;
@@ -782,6 +929,9 @@ function onPosition() {
     el.gpsChip.textContent = 'Yeterli dogrulukta GPS bekleniyor';
     map.setBoat(null);
   }
+  const hasFix = !!fix && !state.tracking;
+  el.hereStart.disabled = !hasFix;
+  el.hereAdd.disabled = !hasFix;
   if (state.tracking) renderTracking();
 }
 
@@ -804,7 +954,7 @@ function setAlert(text, level) {
 }
 
 function startTracking() {
-  if (!state.computed || state.computed.points.length < 2) return;
+  if (!state.computed || displayedPoints().length < 2) return;
   state.tracking = { targetIndex: 1, startedAt: Date.now() };
   el.planView.hidden = true;
   el.trackView.hidden = false;
@@ -817,6 +967,7 @@ function startTracking() {
 function stopTracking(silent) {
   if (!state.tracking) return;
   state.tracking = null;
+  store.saveTrack(state.track);
   releaseWakeLock();
   el.planView.hidden = false;
   el.trackView.hidden = true;
@@ -829,13 +980,17 @@ function renderTracking() {
   const tracking = state.tracking;
   const computed = state.computed;
   if (!tracking || !computed) return;
-  const points = computed.points;
+  const points = displayedPoints();
   const index = Math.min(tracking.targetIndex, points.length - 1);
   const target = points[index];
   const previous = points[index - 1] ?? points[0];
   const fix = state.position;
+  // Bu etap dogrulanmamis mi? Baslangictaki ilk parca ya da varistaki son parca.
+  const onUnverifiedLeg = (state.unverifiedEnds.start && index === 1)
+    || (state.unverifiedEnds.end && index === points.length - 1);
 
-  el.trackTarget.textContent = `${index + 1}/${points.length} · ${target.name ?? 'Rota noktasi'}`;
+  el.trackTarget.textContent = `${index + 1}/${points.length} · ${target.name ?? 'Rota noktasi'}`
+    + (onUnverifiedLeg ? ' · DOGRULANMAMIS' : '');
 
   if (!fix) {
     el.trackSub.textContent = 'Guncel ve yeterli dogruluklu GPS bekleniyor';
@@ -873,7 +1028,9 @@ function renderTracking() {
   const passable = cell >= 0 ? computed.pass[cell] === 1 : null;
   el.tDepth.parentElement.classList.toggle('alarm', passable === false);
 
-  if (passable === false) {
+  if (onUnverifiedLeg) {
+    setAlert('DOGRULANMAMIS ETAP — derinlik kontrolu yok, gozle ve iskandille seyredin', 'danger');
+  } else if (passable === false) {
     const reason = cell >= 0 && !Number.isFinite(depth) ? 'DERINLIK BILINMIYOR' : 'SIG VEYA ENGELLI ALAN';
     setAlert(`${reason} — kontrol edilmis rotanin disindasiniz`, 'danger');
   } else if (Number.isFinite(xte) && Math.abs(xte) > XTE_WARN_METRES) {
@@ -900,7 +1057,7 @@ el.trackStop.addEventListener('click', () => confirmAction('Seyir takibi bitiril
 el.tNext.addEventListener('click', () => {
   const tracking = state.tracking;
   if (!tracking || !state.computed) return;
-  if (tracking.targetIndex + 1 < state.computed.points.length) tracking.targetIndex++;
+  if (tracking.targetIndex + 1 < displayedPoints().length) tracking.targetIndex++;
   else stopTracking();
   renderTracking();
 });
@@ -933,13 +1090,36 @@ el.clear.addEventListener('click', () => {
   });
 });
 
+function currentPoint(name) {
+  const fix = state.position;
+  if (!fix) return null;
+  return { name, latitude: fix.latitude, longitude: fix.longitude };
+}
+
+el.hereStart.addEventListener('click', () => {
+  const here = currentPoint('Konumum');
+  if (!here || state.tracking) return;
+  // Ilk nokta zaten konum ise guncelle, degilse basa ekle.
+  if (state.points[0]?.name === 'Konumum') state.points[0] = here;
+  else state.points.unshift(here);
+  invalidateComputed();
+  render();
+  map.fit(state.points);
+});
+
+el.hereAdd.addEventListener('click', () => {
+  const here = currentPoint(`Konumum ${new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}`);
+  if (!here || state.tracking) return;
+  addPoint(here);
+});
+
 el.locate.addEventListener('click', () => {
   startWatching();
   if (state.position) map.flyTo(state.position.latitude, state.position.longitude, 14);
 });
 
 el.fit.addEventListener('click', () => {
-  const points = state.computed ? state.computed.points : state.points;
+  const points = displayedPoints();
   map.fit(points.length ? points : (state.position ? [state.position] : []));
 });
 
@@ -950,12 +1130,39 @@ el.seamark.addEventListener('click', () => {
   map.setSeamarks(state.settings.seamarks);
 });
 
+/** Katman: kapali -> derinlik bantlari -> hucre durumu -> kapali. */
+function setGridMode(mode) {
+  state.gridMode = mode;
+  const c = state.computed;
+  el.gridButton.classList.toggle('active', !!mode);
+  el.gridButton.textContent = mode === 'cells' ? '\u25a6' : '\u224b';
+  el.gridButton.title = mode === 'depth' ? 'Derinlik katmani (dokun: hucre durumu)'
+    : mode === 'cells' ? 'Hucre durumu (dokun: kapat)' : 'Derinlik katmanini ac';
+  el.legend.hidden = mode !== 'depth';
+  if (!c || !mode) { map.setGrid(null); return; }
+  map.setGrid({ bounds: c.bounds, mask: c.mask, depths: c.depths, required: c.minimumDepth }, mode);
+}
+
 el.gridButton.addEventListener('click', () => {
   if (!state.computed) return;
-  state.showGrid = !state.showGrid;
-  el.gridButton.classList.toggle('active', state.showGrid);
-  map.setGrid(state.showGrid ? { bounds: state.computed.bounds, mask: state.computed.mask } : null);
+  setGridMode(state.gridMode === null ? 'depth' : state.gridMode === 'depth' ? 'cells' : null);
 });
+
+function renderLegend() {
+  el.legendScale.innerHTML = '';
+  for (const item of DEPTH_LEGEND) {
+    const div = document.createElement('div');
+    div.className = 'legend-item';
+    const swatch = document.createElement('div');
+    swatch.className = 'legend-swatch';
+    swatch.style.background = item.colour;
+    const label = document.createElement('div');
+    label.className = 'legend-label';
+    label.textContent = item.label;
+    div.append(swatch, label);
+    el.legendScale.append(div);
+  }
+}
 
 el.resolution.addEventListener('change', () => {
   state.settings.resolution = el.resolution.value;
@@ -987,7 +1194,7 @@ el.save.addEventListener('click', () => {
     name: state.name,
     savedAt: Date.now(),
     speedKnots: state.speedKnots,
-    points: state.computed ? state.computed.points : state.points,
+    points: displayedPoints(),
     anchors: state.points,
     boat: state.boat,
     legs: state.computed?.legs ?? null,
@@ -1051,11 +1258,32 @@ el.routes.addEventListener('click', () => { renderRoutesDialog(); el.routesDialo
 
 el.gpxExport.addEventListener('click', () => {
   if (!state.points.length) return;
+  const unverified = unverifiedSegments();
+  const unverifiedM = unverified.reduce((t, [a, b]) => t + distanceMeters(a.latitude, a.longitude, b.latitude, b.longitude), 0);
   const route = state.computed
-    ? { ...state.computed, name: state.name }
+    ? {
+        ...state.computed, points: displayedPoints(), name: state.name,
+        unverifiedNote: unverified.length
+          ? `${unverified.length} uc parca (${nm(unverifiedM)} nm) derinlik kontrolunden gecmedi.` : null,
+      }
     : { name: state.name, points: state.points, boat: state.boat, provenance: null };
   const safe = state.name.replace(/[^\p{L}\p{N}\-_ ]/gu, '').trim().replace(/\s+/g, '-') || 'DenizRota';
   download(`${safe}.gpx`, routeToGPX(route));
+});
+
+el.trackExport.addEventListener('click', () => {
+  if (state.track.length < 2) return;
+  const started = new Date(state.track[0].at);
+  const stamp = `${started.getFullYear()}-${String(started.getMonth() + 1).padStart(2, '0')}-${String(started.getDate()).padStart(2, '0')}`;
+  download(`DenizRota-iz-${stamp}.gpx`, routeToGPX({ name: `Iz ${stamp}`, points: [], provenance: null }, { track: state.track }));
+});
+
+el.trackClear.addEventListener('click', () => {
+  confirmAction('Kayitli iz silinsin mi?', `${state.track.length} konum noktasi silinecek. Once indirmek isteyebilirsiniz.`, () => {
+    state.track = [];
+    store.saveTrack(state.track);
+    renderTrackButtons();
+  });
 });
 
 el.gpxImport.addEventListener('click', () => el.gpxFile.click());
@@ -1138,6 +1366,8 @@ function loadFromHash() {
 }
 
 function init() {
+  renderLegend();
+  renderTrackButtons();
   el.resolution.value = state.settings.resolution;
   el.seamark.classList.toggle('active', state.settings.seamarks);
   map.setSeamarks(state.settings.seamarks);

@@ -192,3 +192,37 @@ export function cellIndex(rows, cols, cell, x, y) {
     || x < 0 || y < 0 || x >= cols * cell || y >= rows * cell) return -1;
   return (rows - 1 - Math.floor(y / cell)) * cols + Math.floor(x / cell);
 }
+
+/**
+ * Every cell a straight segment between two cell centres touches — the
+ * "supercover" of the line, not just Bresenham's thin line. Where the segment
+ * passes exactly through a corner both flanking cells are visited, matching the
+ * router's rule that a diagonal step needs both its side cells open.
+ *
+ * visit(row, col) may return false to stop early; lineCells then returns false.
+ * Used to prove a smoothed leg is safe: if every cell it touches is passable,
+ * the straight line is at least as good as the staircase it replaces.
+ */
+export function lineCells(r0, c0, r1, c1, visit) {
+  let x = c0, y = r0;
+  let dx = Math.abs(c1 - c0), dy = Math.abs(r1 - r0);
+  const xInc = c1 > c0 ? 1 : -1;
+  const yInc = r1 > r0 ? 1 : -1;
+  let n = 1 + dx + dy;
+  let error = dx - dy;
+  dx *= 2; dy *= 2;
+  for (; n > 0; n--) {
+    if (visit(y, x) === false) return false;
+    if (error > 0) { x += xInc; error -= dy; }
+    else if (error < 0) { y += yInc; error += dx; }
+    else {
+      // Exactly through a corner: both side cells must be open too.
+      if (visit(y, x + xInc) === false) return false;
+      if (visit(y + yInc, x) === false) return false;
+      x += xInc; y += yInc;
+      error -= dy; error += dx;
+      n--;
+    }
+  }
+  return true;
+}

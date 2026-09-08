@@ -7,30 +7,42 @@ function escapeXml(value) {
     .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 }
 
-export function routeToGPX(route) {
+export function routeToGPX(route, { track = [] } = {}) {
   const provenance = route.provenance;
   const description = provenance
     ? `Deneysel rota. EMODnet DTM (GEBCO dolgusu dahil) ve OpenStreetMap katkicilari (ODbL). `
       + `Su cekimi ${route.boat.draft} m, aranan model derinligi ${route.minimumDepth} m, `
       + `kiyi/engel payi ${route.boat.horizontalBuffer} m, hesap hucresi ${provenance.cellMeters} m. `
-      + `Rotadaki en sig model degeri ${route.shallowestModelDepth?.toFixed(1)} m. Seyir garantisi degildir.`
+      + `Rotadaki en sig model degeri ${route.shallowestModelDepth?.toFixed(1)} m. `
+      + (route.unverifiedNote ? `DIKKAT: ${route.unverifiedNote} ` : '')
+      + 'Seyir garantisi degildir.'
     : 'Elle cizilen rota; derinlik ve engel kontrolu yapilmadi.';
   const points = route.points.map((p, i) => {
-    const name = p.name && p.name !== 'Rota donusu' ? p.name : `Nokta ${i + 1}`;
+    const name = (p.name && p.name !== 'Rota donusu' ? p.name : `Nokta ${i + 1}`)
+      + (p.unverified ? ' (dogrulanmamis)' : '');
     return `    <rtept lat="${p.latitude}" lon="${p.longitude}"><name>${escapeXml(name)}</name></rtept>`;
   }).join('\n');
+  // Gidilen gercek iz: <trk>. Rota plan, iz gerceklesen — ikisi ayri kalir.
+  const trackXml = track.length >= 2 ? `  <trk>
+    <name>${escapeXml((route.name ?? 'DenizRota') + ' — iz')}</name>
+    <trkseg>
+${track.map(p => `      <trkpt lat="${p.latitude}" lon="${p.longitude}"><time>${new Date(p.at).toISOString()}</time></trkpt>`).join('\n')}
+    </trkseg>
+  </trk>
+` : '';
+  const routeXml = route.points.length ? `  <rte>
+    <name>${escapeXml(route.name ?? 'DenizRota')}</name>
+    <desc>${escapeXml(description)}</desc>
+${points}
+  </rte>
+` : '';
   return `<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" creator="DenizRota" xmlns="http://www.topografix.com/GPX/1/1">
   <metadata>
     <name>${escapeXml(route.name ?? 'DenizRota')}</name>
     <desc>${escapeXml(description)}</desc>
   </metadata>
-  <rte>
-    <name>${escapeXml(route.name ?? 'DenizRota')}</name>
-    <desc>${escapeXml(description)}</desc>
-${points}
-  </rte>
-</gpx>`;
+${routeXml}${trackXml}</gpx>`;
 }
 
 export function parseGPX(text) {

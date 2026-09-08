@@ -1,12 +1,12 @@
 {
   "anchors": [
     {
-      "name": "Bencik agzi",
+      "name": "Baslangic",
       "latitude": 36.75647,
       "longitude": 28.04228
     },
     {
-      "name": "Palamutbuku",
+      "name": "Varis",
       "latitude": 36.6661,
       "longitude": 27.5105
     }
@@ -27,27 +27,28 @@
   "east": 28.300030196082634,
   "north": 37.05020952107924,
   "pathCells": 636,
-  "waypoints": 117,
+  "waypoints": 10,
   "gridDistanceNm": 28.65094654759554,
-  "routeDistanceNm": 28.669811174844092,
-  "durationHoursAtSpeed": 5.733962234968818,
+  "routeDistanceNm": 27.177571267223236,
+  "durationHoursAtSpeed": 5.435514253444647,
   "speedKnots": 5,
   "shallowestModelDepthOnRoute": 12.27734375,
   "legs": [
     {
-      "from": "Bencik agzi",
-      "to": "Palamutbuku",
+      "from": "Baslangic",
+      "to": "Varis",
       "cells": 636,
+      "turns": 8,
       "gridDistanceM": 53061.55300614694,
       "shallowestModelDepth": 12.27734375
     }
   ],
-  "calculatedAt": 1788907665098,
+  "calculatedAt": 1788909006530,
   "sourceLabel": "EMODnet DTM · GEBCO dolgusu dahil",
   "bathymetryDownloadedAt": 1788906525336,
   "bathymetryFromCache": true,
   "osmDownloadedAt": 1788907664848,
-  "osmFromCache": false,
+  "osmFromCache": true,
   "osmTimestamp": "2026-09-08T22:46:19Z",
   "bathymetryURL": "https://ows.emodnet-bathymetry.eu/wcs?bbox=27.24%2C36.39%2C28.310030196082636%2C37.06020952107924&compression=NONE&coverage=emodnet%3Amean&crs=EPSG%3A4326&format=GeoTIFF&interpolation=nearest&request=GetCoverage&resx=0.0010416666666666667&resy=0.0010416666666666667&service=WCS&version=1.0.0",
   "osmQuery": "[out:json][timeout:90];(\nway[\"natural\"=\"coastline\"](36.39,27.24,37.06020952107924,28.310030196082636);\nnwr[\"seamark:type\"~\"^(rock|wreck|obstruction|restricted_area|military_area|marine_farm)$\"](36.39,27.24,37.06020952107924,28.310030196082636);\nnwr[\"man_made\"~\"^(pier|breakwater|groyne)$\"](36.39,27.24,37.06020952107924,28.310030196082636);\nnwr[\"natural\"=\"reef\"](36.39,27.24,37.06020952107924,28.310030196082636);\n);out body geom;",
@@ -63,6 +64,6 @@
   "unknownCellCount": 0,
   "shallowCellCount": 63205,
   "totalCellCount": 1203072,
-  "elapsedMs": 2585,
+  "elapsedMs": 258,
   "validation": "JS engine: numeric GeoTIFF decode + coast/obstacle mask + A*, every returned cell and its full horizontal buffer re-checked independently."
 }

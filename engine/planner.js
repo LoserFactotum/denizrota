@@ -12,7 +12,7 @@ import {
   plan, passableCells, DR_OK, DR_START_BLOCKED, DR_GOAL_BLOCKED, DR_NO_ROUTE, DR_CANCELLED,
   COVERED, LAND as FLAG_LAND,
 } from './router.js';
-import { BLOCKED, WATER } from './mask.js';
+import { BLOCKED, WATER, lineCells } from './mask.js';
 import { initialBearingDeg } from './navmath.js';
 import { fetchBathymetry, fetchOSM, sha256Hex, SOURCE_LABEL } from './sources.js';
 import { distanceMeters, routeDistanceMeters } from './navmath.js';
@@ -223,19 +223,70 @@ export function diagnoseAnchor({ grid, boat, point, searchMetres = 12000 }) {
   };
 }
 
-/** Keep direction changes and at least every 8th cell; never cut a corner. */
-function simplify(path, columns) {
-  const keep = [];
-  for (let i = 0; i < path.length; i++) {
-    if (i === 0 || i === path.length - 1 || i % 8 === 0) { keep.push(path[i]); continue; }
-    const previous = path[i - 1], current = path[i], next = path[i + 1];
-    if (Math.floor(current / columns) - Math.floor(previous / columns)
-      !== Math.floor(next / columns) - Math.floor(current / columns)
-      || (current % columns) - (previous % columns) !== (next % columns) - (current % columns)) {
-      keep.push(current);
+/**
+ * Turn the grid staircase into the legs a navigator would actually steer.
+ *
+ * A* on eight-connected cells can only turn in 45° steps, so its output zigzags
+ * along anything that is not axis-aligned. This pulls the string taut: from each
+ * anchor it reaches as far ahead as a STRAIGHT line stays entirely inside cells
+ * that are passable with the full horizontal buffer, then makes that the next
+ * turn. Nothing is smoothed across a cell the router would not have entered, so
+ * the result is never less safe than the staircase — only shorter and steerable.
+ */
+function straighten(path, columns, isClear) {
+  if (path.length < 3) return Array.from(path);
+  const rowOf = (i) => Math.floor(i / columns);
+  const colOf = (i) => i % columns;
+  const clearBetween = (a, b) =>
+    lineCells(rowOf(a), colOf(a), rowOf(b), colOf(b), (r, c) => isClear(r * columns + c));
+
+  const out = [path[0]];
+  let anchor = 0;
+  while (anchor < path.length - 1) {
+    let best = anchor + 1;
+    // Walk forward while the straight line stays clear; stop at the last one that did.
+    for (let j = anchor + 2; j < path.length; j++) {
+      if (!clearBetween(path[anchor], path[j])) break;
+      best = j;
     }
+    out.push(path[best]);
+    anchor = best;
   }
-  return keep;
+  return out;
+}
+
+/**
+ * Re-check the straightened legs from scratch: every cell each straight segment
+ * touches must be covered, deep enough, and clear across the whole buffer.
+ * Returns null when clean, else a description.
+ */
+export function auditSegments(grid, cells, boat) {
+  const { rows, columns } = grid.bounds;
+  const required = minimumDepthFor(boat);
+  const radius = Math.ceil(boat.horizontalBuffer / grid.bounds.cell);
+  const ok = (index) => grid.flags[index] === COVERED && grid.depths[index] >= required;
+  const clear = (index) => {
+    const r = Math.floor(index / columns), c = index % columns;
+    if (r - radius < 0 || c - radius < 0 || r + radius >= rows || c + radius >= columns) return false;
+    for (let dr = -radius; dr <= radius; dr++) {
+      for (let dc = -radius; dc <= radius; dc++) {
+        if (!ok((r + dr) * columns + (c + dc))) return false;
+      }
+    }
+    return true;
+  };
+  for (let k = 1; k < cells.length; k++) {
+    const a = cells[k - 1], b = cells[k];
+    let bad = -1;
+    lineCells(Math.floor(a / columns), a % columns, Math.floor(b / columns), b % columns, (r, c) => {
+      if (r < 0 || c < 0 || r >= rows || c >= columns) { bad = -2; return false; }
+      const i = r * columns + c;
+      if (!clear(i)) { bad = i; return false; }
+      return true;
+    });
+    if (bad !== -1) return `duzlestirilmis etap ${k}: hucre ${bad} gecilemez`;
+  }
+  return null;
 }
 
 function metres(value) {
@@ -295,6 +346,10 @@ export function routeOnGrid({ grid, anchors, boat, shouldCancel }) {
     depthUncertaintyM: uncertainty,
     flags: grid.flags,
   };
+  // The same buffer-aware passability the router used, reused for straightening.
+  const { pass } = passableCells(engineGrid, vessel);
+  const isClear = (index) => pass[index] === 1;
+
   const points = [anchors[0]];
   const legs = [];
   const allCells = [];
@@ -321,16 +376,21 @@ export function routeOnGrid({ grid, anchors, boat, shouldCancel }) {
     }
     if (legShallowest < shallowest) shallowest = legShallowest;
     gridDistanceM += result.distanceM;
+    const straightened = straighten(result.path, bounds.columns, isClear);
+    const segmentProblem = auditSegments(grid, straightened, boat);
+    if (segmentProblem) {
+      throw new PlanningError('Bagimsiz guvenlik denetimi duzlestirilmis rotayi reddetti; rota verilmedi.',
+        { problem: segmentProblem });
+    }
     legs.push({
       from: from.name, to: to.name,
       cells: result.count,
+      turns: straightened.length,
       gridDistanceM: result.distanceM,
       shallowestModelDepth: legShallowest,
     });
     // Exact anchors connect to the centres of their own fully checked cells.
-    for (const index of simplify(Array.from(result.path), bounds.columns)) {
-      points.push(cellCentre(bounds, index));
-    }
+    for (const index of straightened) points.push(cellCentre(bounds, index));
     points.push(to);
   }
   stopIfCancelled();
