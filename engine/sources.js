@@ -8,7 +8,15 @@
 import { downloadBBox, overpassBBox, PlanningError } from './grid.js';
 
 export const BATHYMETRY_ENDPOINT = 'https://ows.emodnet-bathymetry.eu/wcs';
-export const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
+// Overpass sunuculari sirayla denenir. Tek sunucu yogunlukta 429 dondurdugunde
+// rota hesabi tamamen durmasin diye; hepsi ayni OSM verisini sunar ve hepsi
+// CORS'a acik. Sira, ana sunucudan aynalara dogrudur.
+export const OVERPASS_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+];
+export const OVERPASS_ENDPOINT = OVERPASS_ENDPOINTS[0];
 export const SOURCE_LABEL = 'EMODnet DTM · GEBCO dolgusu dahil';
 export const MAX_RESPONSE_BYTES = 80000000;
 export const CACHE_SECONDS = 86400;
@@ -68,8 +76,10 @@ async function cacheKey(url, body) {
  * the caller always validates it. Obvious XML/HTML error pages and Overpass
  * "remark" responses are never cached as if they were data.
  */
-export async function fetchSource({ url, body, cache, signal, label }) {
-  const key = await cacheKey(url, body);
+export async function fetchSource({ url, body, cache, signal, label, cacheId }) {
+  // Onbellek kimligi istekten ayrilabilir: ayni Overpass sorgusu hangi aynadan
+  // gelirse gelsin ayni veridir, tekrar indirilmemeli.
+  const key = await cacheKey(cacheId ?? url, body);
   if (cache) {
     const hit = await cache.get(key);
     if (hit && Number.isFinite(hit.downloadedAt)
@@ -94,7 +104,15 @@ export async function fetchSource({ url, body, cache, signal, label }) {
       { cause: String(error) });
   }
   if (!response.ok) {
-    throw new PlanningError(`${label} yanit vermedi (HTTP ${response.status}). Tekrar deneyebilirsiniz.`);
+    const busy = response.status === 429 || response.status === 504 || response.status === 503;
+    const retryAfter = Number(response.headers.get('retry-after'));
+    const wait = Number.isFinite(retryAfter) && retryAfter > 0 ? ` Yaklasik ${retryAfter} saniye sonra tekrar deneyin.` : '';
+    const error = new PlanningError(busy
+      ? `${label} su an yogun (HTTP ${response.status}).${wait || ' Biraz sonra tekrar deneyin.'}`
+      : `${label} yanit vermedi (HTTP ${response.status}). Tekrar deneyebilirsiniz.`,
+      { status: response.status, busy });
+    error.busy = busy;
+    throw error;
   }
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (!bytes.length || bytes.length > MAX_RESPONSE_BYTES) {
@@ -118,9 +136,30 @@ export async function fetchBathymetry(bounds, { cache, signal } = {}) {
   return { ...result, url };
 }
 
-export async function fetchOSM(bounds, { cache, signal } = {}) {
+export async function fetchOSM(bounds, { cache, signal, onProgress } = {}) {
   const query = overpassQuery(bounds);
   const body = new URLSearchParams({ data: query }).toString();
-  const result = await fetchSource({ url: OVERPASS_ENDPOINT, body, cache, signal, label: 'OpenStreetMap Overpass' });
-  return { ...result, query };
+  let last = null;
+  for (let i = 0; i < OVERPASS_ENDPOINTS.length; i++) {
+    const url = OVERPASS_ENDPOINTS[i];
+    const host = new URL(url).host;
+    try {
+      const result = await fetchSource({
+        url, body, cache, signal,
+        cacheId: 'overpass',
+        label: `OpenStreetMap Overpass (${host})`,
+      });
+      return { ...result, query, endpoint: url };
+    } catch (error) {
+      if (error?.name === 'AbortError') throw error;
+      last = error;
+      // Yalnizca sunucu mesgul/erisilemez oldugunda aynaya gec. Sorgu hatasi
+      // her sunucuda ayni sonucu verecegi icin tekrar denemek anlamsizdir.
+      const retryable = error?.busy || error?.detail?.cause;
+      if (!retryable || i === OVERPASS_ENDPOINTS.length - 1) throw error;
+      onProgress?.(`${host} yogun, yedek sunucu deneniyor…`);
+      await new Promise(resolve => setTimeout(resolve, 1200));
+    }
+  }
+  throw last;
 }

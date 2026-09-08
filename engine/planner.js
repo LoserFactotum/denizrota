@@ -366,7 +366,9 @@ export async function planRoute({
     }
 
     onProgress?.('Kiyi, kayalik, batik ve engeller indiriliyor…', 0.35);
-    const osm = await fetchOSM(bounds, { cache, signal });
+    const osm = await fetchOSM(bounds, {
+      cache, signal, onProgress: (text) => onProgress?.(text, 0.35),
+    });
     let osmDocument;
     try {
       osmDocument = JSON.parse(new TextDecoder().decode(osm.bytes));
