@@ -211,11 +211,13 @@ button { cursor: pointer; }
   background: var(--panel);
   border-top: 1px solid var(--line);
   padding: 0 14px calc(var(--safe-b) + 12px);
-  max-height: 62vh;
+  /* Telefonda haritaya yer kalsin; tutamak ile buyutulebilir. */
+  max-height: 48vh;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
-.panel.tall { max-height: 82vh; }
+.panel.tall { max-height: 84vh; }
+@media (min-height: 900px) { .panel { max-height: 56vh; } }
 
 .panel-grip {
   height: 20px; margin: 0 auto; width: 90px;
@@ -292,9 +294,11 @@ button { cursor: pointer; }
 }
 .metric-label { display: block; font-size: 10px; font-weight: 700; color: var(--muted); letter-spacing: .4px; }
 .metric b {
-  display: block; font-size: 21px; line-height: 1.15; font-variant-numeric: tabular-nums;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: block; font-size: 21px; line-height: 1.12; font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
+/* "5 sa 45 dk" dar ekranda kirpilmasin */
+@media (max-width: 430px) { .metric b { font-size: 18px; } .metric.big b { font-size: 25px; } }
 .metric.big b { font-size: 28px; }
 .metric-unit { display: block; font-size: 11px; color: var(--muted); }
 .metric.alarm { border-color: var(--red); background: color-mix(in srgb, var(--red) 12%, var(--paper)); }
