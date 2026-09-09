@@ -406,6 +406,7 @@ button { cursor: pointer; }
 
 .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 10px 0; font-size: 14px; }
 .switch-row select { height: 38px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); padding: 0 8px; max-width: 60%; }
+.switch-row input[type="checkbox"] { width: 26px; height: 26px; flex: none; accent-color: var(--teal); }
 
 .provenance { font-size: 13px; }
 .prov-row { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--line); }

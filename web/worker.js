@@ -36,6 +36,7 @@ self.onmessage = async (event) => {
       signal: controller.signal,
       cellOverride: message.cellOverride,
       maxCells: message.maxCells,
+      enforceOwnWaters: message.enforceOwnWaters !== false,
       onProgress: (text, fraction) => self.postMessage({ type: 'progress', text, fraction }),
     });
 
@@ -75,6 +76,9 @@ self.onmessage = async (event) => {
       mask: grid.mask,
       pass,
       depths: displayDepths,
+      boundaryLines: grid.boundaryLines ?? [],
+      foreignCellCount: grid.foreign ?? 0,
+      boundaryChecked: grid.boundaryChecked ?? false,
     };
     self.postMessage(payload, [grid.mask.buffer, pass.buffer, displayDepths.buffer]);
   } catch (error) {

@@ -1,0 +1,73 @@
+{
+  "anchors": [
+    {
+      "name": "Bozburun acigi",
+      "latitude": 36.658,
+      "longitude": 28.018
+    },
+    {
+      "name": "Symi guneyi",
+      "latitude": 36.56,
+      "longitude": 27.83
+    }
+  ],
+  "boat": {
+    "draft": 1.5,
+    "underKeel": 1,
+    "modelAllowance": 5,
+    "waterLevelDrop": 0,
+    "horizontalBuffer": 150
+  },
+  "minimumModelDepth": 7.5,
+  "foreignCellCount": 486614,
+  "boundaryChecked": true,
+  "boundaryWays": 9,
+  "cellMeters": 60,
+  "gridRows": 1205,
+  "gridColumns": 1116,
+  "west": 27.55,
+  "south": 36.3,
+  "east": 28.30017800574024,
+  "north": 36.95020952107924,
+  "pathCells": 403,
+  "waypoints": 21,
+  "gridDistanceNm": 16.59333069950038,
+  "routeDistanceNm": 16.414682309498644,
+  "durationHoursAtSpeed": 3.2829364618997285,
+  "speedKnots": 5,
+  "shallowestModelDepthOnRoute": 41.453125,
+  "legs": [
+    {
+      "from": "Bozburun acigi",
+      "to": "Symi guneyi",
+      "cells": 403,
+      "turns": 19,
+      "gridDistanceM": 30730.848455474705,
+      "shallowestModelDepth": 41.453125
+    }
+  ],
+  "calculatedAt": 1788950933135,
+  "sourceLabel": "EMODnet DTM · GEBCO dolgusu dahil",
+  "bathymetryDownloadedAt": 1788950904800,
+  "bathymetryFromCache": false,
+  "osmDownloadedAt": 1788950836118,
+  "osmFromCache": true,
+  "osmTimestamp": "2026-06-01T08:52:28Z",
+  "bathymetryURL": "https://ows.emodnet-bathymetry.eu/wcs?bbox=27.54%2C36.29%2C28.31017800574024%2C36.960209521079236&compression=NONE&coverage=emodnet%3Amean&crs=EPSG%3A4326&format=GeoTIFF&interpolation=nearest&request=GetCoverage&resx=0.0010416666666666667&resy=0.0010416666666666667&service=WCS&version=1.0.0",
+  "osmQuery": "[out:json][timeout:90];(\nway[\"natural\"=\"coastline\"](36.25,27.5,37,28.5);\nnwr[\"seamark:type\"~\"^(rock|wreck|obstruction|restricted_area|military_area|marine_farm)$\"](36.25,27.5,37,28.5);\nnwr[\"man_made\"~\"^(pier|breakwater|groyne)$\"](36.25,27.5,37,28.5);\nnwr[\"natural\"=\"reef\"](36.25,27.5,37,28.5);\nway[\"boundary\"=\"administrative\"][\"admin_level\"=\"2\"][\"maritime\"=\"yes\"](36.25,27.5,37,28.5);\n);out body geom;",
+  "bathymetrySHA256": "7c93da2049eeb0546a5df9269ffdc0e708500da018f00facc3f050e8cba15264",
+  "osmSHA256": "39da3ca23f5f04a7ee5bacfdf7abc1aca2d3b6f3b57b0d257e004e85ce7316e0",
+  "sourceLatitudeStep": 0.0010423165180081372,
+  "margin": 0.25,
+  "widenedSearchArea": false,
+  "attempts": [],
+  "coastWays": 468,
+  "coastSegments": 41237,
+  "enforceOwnWaters": false,
+  "obstacleCount": 357,
+  "unknownCellCount": 0,
+  "shallowCellCount": 65452,
+  "totalCellCount": 1344780,
+  "elapsedMs": 30993,
+  "validation": "JS engine: numeric GeoTIFF decode + coast/obstacle mask + A*, every returned cell and its full horizontal buffer re-checked independently."
+}

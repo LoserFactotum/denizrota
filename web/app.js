@@ -52,7 +52,7 @@ const state = {
   points: [],            // kullanicinin noktalari (anchor)
   speedKnots: 5,
   boat: store.loadBoat(DEFAULT_BOAT),
-  settings: store.loadSettings({ seamarks: true, resolution: 'auto', boatPreset: 'dufour470' }),
+  settings: store.loadSettings({ seamarks: true, resolution: 'auto', boatPreset: 'dufour470', ownWaters: true }),
   computed: null,        // worker sonucu
   // Kullanicinin gercek ucu modelce dogrulanamiyorsa (dar koy gibi), rota en
   // yakin uygun sudan hesaplanir ve aradaki parca DOGRULANMAMIS etap olarak
@@ -101,6 +101,7 @@ const el = {
   trackExport: $('track-export'), trackClear: $('track-clear'),
   boatFields: $('boat-fields'), requiredDepth: $('required-depth'), resolution: $('resolution'),
   boatPreset: $('boat-preset'), hereStart: $('here-start'), hereAdd: $('here-add'),
+  ownWaters: $('own-waters'),
   unverifiedNote: $('unverified-note'), legend: $('legend'), legendScale: $('legend-scale'),
   provenance: $('provenance'),
   trackTarget: $('track-target'), trackSub: $('track-sub'), trackStop: $('track-stop'),
@@ -164,6 +165,7 @@ function invalidateComputed() {
     state.computed = null;
     state.gridMode = null;
     map.setGrid(null);
+    map.setBoundaries(null);
     el.gridButton.classList.remove('active');
     el.legend.hidden = true;
     stopTracking(true);
@@ -532,6 +534,10 @@ function renderProvenance() {
     ['Grid', `${computed.bounds.columns} × ${computed.bounds.rows} hucre`],
     ['Kaynak grid adimi', `${(p.sourceLatitudeStep * 111194.9).toFixed(0)} m (${p.sourceLatitudeStep.toFixed(7)}°)`],
     ['Kiyi cizgisi', `${p.coastWays} yol · ${p.coastSegments} parca`],
+    ['Karasulari siniri', p.boundaryChecked
+      ? `${p.boundaryWays} yol · ${p.enforceOwnWaters ? 'rota kisiti acik' : 'yalnizca gosterim'}`
+      : 'bu alanda sinir verisi yok'],
+    ['Sinir disi hucre', `${p.foreignCellCount ?? 0} / ${p.totalCellCount}`],
     ['Engel geometrisi', String(p.obstacleCount)],
     ['Bilinmeyen hucre', `${p.unknownCellCount} / ${p.totalCellCount}`],
     ['Sig hucre', `${p.shallowCellCount} / ${p.totalCellCount}`],
@@ -684,7 +690,11 @@ function ensureWorker() {
         mask: message.mask,
         pass: message.pass,
         depths: message.depths,
+        boundaryLines: message.boundaryLines ?? [],
+        foreignCellCount: message.foreignCellCount ?? 0,
+        boundaryChecked: message.boundaryChecked ?? false,
       };
+      map.setBoundaries(message.boundaryLines);
       render();
       map.fit(displayedPoints());
       // Hesap bitince derinlik katmani kendiliginden acilir: sonucu okumanin
@@ -833,6 +843,7 @@ function calculate() {
     anchors: effectiveAnchors(),
     boat: { ...state.boat },
     cellOverride: state.settings.resolution === 'auto' ? undefined : Number(state.settings.resolution),
+    enforceOwnWaters: state.settings.ownWaters !== false,
   });
 }
 
@@ -1181,6 +1192,13 @@ function renderLegend() {
   }
 }
 
+el.ownWaters.addEventListener('change', () => {
+  state.settings.ownWaters = el.ownWaters.checked;
+  store.saveSettings(state.settings);
+  invalidateComputed();
+  render();
+});
+
 el.resolution.addEventListener('change', () => {
   state.settings.resolution = el.resolution.value;
   store.saveSettings(state.settings);
@@ -1386,6 +1404,7 @@ function init() {
   renderLegend();
   renderTrackButtons();
   el.resolution.value = state.settings.resolution;
+  el.ownWaters.checked = state.settings.ownWaters !== false;
   el.seamark.classList.toggle('active', state.settings.seamarks);
   map.setSeamarks(state.settings.seamarks);
   renderBoatFields();

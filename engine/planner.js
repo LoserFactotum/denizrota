@@ -12,7 +12,7 @@ import {
   plan, passableCells, DR_OK, DR_START_BLOCKED, DR_GOAL_BLOCKED, DR_NO_ROUTE, DR_CANCELLED,
   COVERED, LAND as FLAG_LAND,
 } from './router.js';
-import { BLOCKED, WATER, lineCells } from './mask.js';
+import { BLOCKED, WATER, FOREIGN, lineCells } from './mask.js';
 import { initialBearingDeg } from './navmath.js';
 import { fetchBathymetry, fetchOSM, sha256Hex, SOURCE_LABEL } from './sources.js';
 import { distanceMeters, routeDistanceMeters } from './navmath.js';
@@ -98,6 +98,8 @@ export const BLOCK_REASONS = {
   land: 'kara olarak isaretli',
   obstacle: 'haritali bir engel/kiyi cizgisine degiyor',
   shallow: 'modele gore cok sig',
+  foreign: 'karasulari sinirinin obur tarafinda — baslangic noktanizdan '
+    + 'sinir gecilmeden ulasilamiyor',
   unresolved: 'derinlik modeli burayi cozemiyor — kaynak gridi yaklasik 115 m, '
     + 'dar koylar ve kanallar kiyiyla karisip sifir derinlik olarak okunur',
   buffer: 'kiyi/engel payi bu noktaya sigmiyor',
@@ -132,6 +134,7 @@ export function diagnoseAnchor({ grid, boat, point, searchMetres = 12000 }) {
   const row = Math.floor(index / columns), col = index % columns;
   let reason;
   if (grid.flags[index] === 0) reason = 'unknown';
+  else if (grid.mask[index] === FOREIGN) reason = 'foreign';
   else if (grid.flags[index] === FLAG_LAND) reason = grid.mask[index] === BLOCKED ? 'obstacle' : 'land';
   else if (grid.depths[index] <= 0.5) reason = 'unresolved';
   else if (!(grid.depths[index] >= required)) reason = 'shallow';
@@ -417,6 +420,7 @@ export function routeOnGrid({ grid, anchors, boat, shouldCancel }) {
 export async function planRoute({
   anchors, boat = DEFAULT_BOAT, cache, signal, onProgress,
   maxCells = DEFAULT_MAX_CELLS, marginLadder = MARGIN_LADDER, cellOverride,
+  enforceOwnWaters = true,
 }) {
   if (!validateBoat(boat)) throw new PlanningError('Tekne olculerini kontrol edin.');
   const minimumDepth = minimumDepthFor(boat);
@@ -454,8 +458,12 @@ export async function planRoute({
     }
     const features = parseOSM(osmDocument, bounds);
 
+    // Tohum = ilk rota noktasi: "senin tarafin" oradan belirlenir.
+    let seedIndex = -1;
+    try { seedIndex = indexOf(bounds, anchors[0]); } catch { seedIndex = -1; }
     const grid = prepareGrid({
       bounds, raster, features, minimumDepth, maxCells, shouldCancel,
+      seedIndex, enforceOwnWaters,
       onProgress: (message) => onProgress?.(message, 0.5),
     });
 
@@ -501,6 +509,10 @@ export async function planRoute({
         attempts,
         coastWays: features.coastWays,
         coastSegments: features.segmentCount,
+        boundaryWays: features.boundaries?.length ?? 0,
+        boundaryChecked: grid.boundaryChecked,
+        enforceOwnWaters: grid.enforceOwnWaters,
+        foreignCellCount: grid.foreign,
         obstacleCount: features.obstacles.length,
         unknownCellCount: grid.unknown,
         shallowCellCount: grid.shallow,

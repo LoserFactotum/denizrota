@@ -8,6 +8,9 @@
 // index below only skips segments that could not cross the scanline anyway.
 
 export const UNKNOWN = 0, WATER = 1, LAND = 2, BLOCKED = 4;
+// Yalnizca gosterim ve rota kisiti icin: baslangic noktasindan deniz yoluyla,
+// karasulari sinirini gecmeden ulasilamayan su. Kiyi maskesi bu degeri uretmez.
+export const FOREIGN = 16;
 
 function segmentDistance(px, py, ax, ay, bx, by) {
   const dx = bx - ax, dy = by - ay, len = dx * dx + dy * dy;

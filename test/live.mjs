@@ -65,6 +65,7 @@ try {
   route = await planRoute({
     anchors, boat, cache,
     cellOverride: args.has('cell') ? Number(args.get('cell')) : undefined,
+    enforceOwnWaters: args.get('ownWaters') !== 'false',
     onProgress: (message) => console.log('  ' + message),
   });
 } catch (error) {
@@ -79,6 +80,9 @@ const seconds = route.distanceM / (speedKnots * 1852 / 3600);
 const report = {
   anchors, boat,
   minimumModelDepth: route.minimumDepth,
+  foreignCellCount: route.grid.foreign,
+  boundaryChecked: route.grid.boundaryChecked,
+  boundaryWays: route.provenance.boundaryWays,
   cellMeters: route.bounds.cell,
   gridRows: route.bounds.rows,
   gridColumns: route.bounds.columns,

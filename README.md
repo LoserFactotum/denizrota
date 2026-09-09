@@ -28,6 +28,9 @@ Kurulum, Mac ve Xcode gerekmez.
 - **Derinlik katmanı** — teknenizin gereksinimine göre renklendirilmiş bantlar,
   yakınlaştırınca iskandil rakamları; geçilmez sığlık kırmızı, sınırdaki
   derinlik turuncu. İkinci dokunuşta hücre durumu (kara / kıyı-engel / bilinmiyor).
+- **Karasuları sınırı** — rota, başlangıç noktanızın bulunduğu karasularından
+  çıkmaz (varsayılan açık; kapatılabilir). Sınır her durumda haritada çizilir.
+  Kaynak OpenStreetMap'tir ve **hukuki dayanak değildir** — aşağıya bakın.
 - **Neden olmadığını söyler** — bir nokta kullanılamıyorsa sebebini, en büyük
   uygun kıyı payını ve **deniz yoluyla** en yakın uygun suyu gösterir. Noktayı
   kendiliğinden taşımaz; önce haritada gösterip onay ister.
@@ -84,6 +87,12 @@ Aranan derinlik = su çekimi + omurga altı pay + model payı + su seviyesi dü�
   ölçülmüş bir hata sınırı değil, sizin seçtiğiniz bir toleranstır.
 - **EMODnet ve GEBCO bağımsız iki kaynak değildir**; GEBCO, EMODnet modelinin
   içindeki dolgudur. Bu sürüm hücre bazında kaynak ayrımı yapmaz.
+- **Karasuları sınırı tartışmalıdır.** Ege'de Türkiye ve Yunanistan 6 mil
+  uygular; bazı alanların ve adacıkların statüsü anlaşmazlık konusudur.
+  Uygulamanın çizdiği sınır **OpenStreetMap'in bir yorumudur**, resmî ya da
+  hukuki bir kaynak değildir ve sahil güvenlik uygulamasını bağlamaz. "Bu
+  taraftan geçersen sorun çıkmaz" demez; yalnızca "OSM'ye göre sınırın bu
+  tarafında kal" der.
 - **Takip yalnızca uygulama ön plandayken** çalışır. Rotadan sapınca çizilen
   turuncu çizgi kontrol edilmemiş bir yöndür, rota değildir.
 

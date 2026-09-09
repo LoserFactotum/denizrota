@@ -11,7 +11,7 @@
 //     only limit left is the cell budget, which is about compute, not safety.
 
 import { minDepth } from './geotiff.js';
-import { blockShape, coastMask, cellIndex, UNKNOWN, WATER, LAND, BLOCKED } from './mask.js';
+import { blockShape, coastMask, cellIndex, UNKNOWN, WATER, LAND, BLOCKED, FOREIGN } from './mask.js';
 import { COVERED, LAND as FLAG_LAND } from './router.js';
 
 export const SHALLOW = 8; // preview-only mask value: covered but below the threshold
@@ -157,10 +157,20 @@ export function parseOSM(document, bounds) {
 
   const coast = [];
   const obstacles = [];
+  const boundaries = [];
   const balance = new Map();
   let coastWays = 0;
   for (const element of document.elements) {
     const tags = element.tags ?? {};
+    // Deniz sinirlari: engel DEGIL. Ayri tutulur; istege bagli olarak rota
+    // kisiti, her durumda haritada cizgi olur.
+    if (tags.boundary === 'administrative' && tags.maritime === 'yes' && Array.isArray(element.geometry)) {
+      boundaries.push({
+        points: geometry(element),
+        latlon: element.geometry.map(p => [p.lat, p.lon]),
+      });
+      continue;
+    }
     if (tags.natural === 'coastline') {
       coastWays++;
       const g = geometry(element);
@@ -221,14 +231,54 @@ export function parseOSM(document, bounds) {
     throw new PlanningError('Indirilen alanin icinde kopuk veya cakisan kiyi cizgisi var. Hesap tamamlanamadi.',
       { gaps: gaps.slice(0, 10), gapCount: gaps.length });
   }
-  return { coast: Float64Array.from(coast), segmentCount, obstacles, timestamp, coastWays };
+  return { coast: Float64Array.from(coast), segmentCount, obstacles, boundaries, timestamp, coastWays };
 }
 
 /**
  * Build the routing grid: land/water mask, obstacle paint, per-cell shallowest
  * model depth. Unknown cells stay unknown. Nothing is interpolated.
  */
-export function prepareGrid({ bounds, raster, features, minimumDepth, onProgress, shouldCancel, maxCells = DEFAULT_MAX_CELLS }) {
+/**
+ * Baslangic noktasindan deniz yoluyla ulasilan su hucreleri.
+ * barrier verilirse o hucreler gecilmez (karasulari siniri).
+ */
+function floodWater(rows, columns, mask, seed, barrier) {
+  const total = rows * columns;
+  const seen = new Uint8Array(total);
+  const queue = new Int32Array(total);
+  const passable = (i) => (mask[i] === WATER || mask[i] === SHALLOW) && !(barrier && barrier[i]);
+  if (!passable(seed)) return seen;
+  let head = 0, tail = 0;
+  queue[tail++] = seed; seen[seed] = 1;
+  while (head < tail) {
+    const i = queue[head++];
+    const r = Math.floor(i / columns), c = i - r * columns;
+    if (r > 0) { const j = i - columns; if (!seen[j] && passable(j)) { seen[j] = 1; queue[tail++] = j; } }
+    if (r + 1 < rows) { const j = i + columns; if (!seen[j] && passable(j)) { seen[j] = 1; queue[tail++] = j; } }
+    if (c > 0) { const j = i - 1; if (!seen[j] && passable(j)) { seen[j] = 1; queue[tail++] = j; } }
+    if (c + 1 < columns) { const j = i + 1; if (!seen[j] && passable(j)) { seen[j] = 1; queue[tail++] = j; } }
+  }
+  return seen;
+}
+
+/** Verilen hucrenin kendisi ya da yakinindaki ilk su hucresi; yoksa -1. */
+function nearestWaterCell(rows, columns, mask, index, maxRings = 40) {
+  const isWater = (i) => mask[i] === WATER || mask[i] === SHALLOW;
+  if (index >= 0 && isWater(index)) return index;
+  const row = Math.floor(index / columns), col = index % columns;
+  for (let rr = 1; rr <= maxRings; rr++) {
+    for (let d = -rr; d <= rr; d++) {
+      for (const [r, c] of [[row - rr, col + d], [row + rr, col + d], [row + d, col - rr], [row + d, col + rr]]) {
+        if (r < 0 || c < 0 || r >= rows || c >= columns) continue;
+        const i = r * columns + c;
+        if (isWater(i)) return i;
+      }
+    }
+  }
+  return -1;
+}
+
+export function prepareGrid({ bounds, raster, features, minimumDepth, onProgress, shouldCancel, maxCells = DEFAULT_MAX_CELLS, seedIndex = -1, enforceOwnWaters = true }) {
   const { rows, columns, cell } = bounds;
   const total = rows * columns;
   const mask = new Uint8Array(total);
@@ -287,5 +337,51 @@ export function prepareGrid({ bounds, raster, features, minimumDepth, onProgress
   if (!flags.includes(COVERED)) {
     throw new PlanningError('Indirilen alanda kullanilabilir deniz/derinlik verisi bulunamadi.');
   }
-  return { bounds, mask, depths, flags, unknown, shallow, total, shallowestModelDepth: shallowest };
+
+  // ------------------------------------------------------ karasulari siniri
+  //
+  // Sinir cizgileri, kiyi gibi, bariyer olarak islenir. Sonra BASLANGIC
+  // NOKTASINDAN iki yayilma yapilir: biri siniri gecmeden, digeri siniri yok
+  // sayarak. Ikisinin farki "sinirin obur tarafi"dir.
+  //
+  // Boylece hangi ulkede oldugunu bilmeye gerek kalmaz: nerede basliyorsan
+  // orasi senin tarafindir. Yunan adasindan kalkarsan mantik kendiliginden
+  // tersine doner.
+  let foreign = 0;
+  let boundaryChecked = false;
+  if (features.boundaries?.length && seedIndex >= 0) {
+    stopIfCancelled();
+    onProgress?.('Karasulari siniri isleniyor…');
+    const barrier = new Uint8Array(total);
+    for (const line of features.boundaries) {
+      const flat = new Float64Array(line.points.length * 2);
+      for (let i = 0; i < line.points.length; i++) {
+        flat[i * 2] = line.points[i].x;
+        flat[i * 2 + 1] = line.points[i].y;
+      }
+      blockShape(rows, columns, cell, flat, line.points.length, false, barrier);
+    }
+    const seed = nearestWaterCell(rows, columns, mask, seedIndex);
+    if (seed >= 0 && !barrier[seed]) {
+      const own = floodWater(rows, columns, mask, seed, barrier);
+      const anywhere = floodWater(rows, columns, mask, seed, null);
+      for (let i = 0; i < total; i++) {
+        if (!(mask[i] === WATER || mask[i] === SHALLOW)) continue;
+        // Sinirin uzerindeki hucreler de disarida sayilir: cizgiye yaslanilmaz.
+        const outside = barrier[i] ? anywhere[i] || own[i] : anywhere[i] && !own[i];
+        if (!outside) continue;
+        mask[i] = FOREIGN;
+        foreign++;
+        if (enforceOwnWaters) flags[i] = FLAG_LAND;
+      }
+      boundaryChecked = true;
+    }
+  }
+
+  return {
+    bounds, mask, depths, flags, unknown, shallow, total,
+    shallowestModelDepth: shallowest,
+    foreign, boundaryChecked, enforceOwnWaters,
+    boundaryLines: features.boundaries?.map(b => b.latlon) ?? [],
+  };
 }

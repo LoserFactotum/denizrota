@@ -12,6 +12,7 @@ const MASK_COLOURS = {
   2: [0, 0, 0, 0],         // kara (taban harita zaten gosteriyor)
   4: [210, 40, 50, 120],   // kiyi / engel
   8: [245, 145, 0, 130],   // sig
+  16: [123, 47, 242, 95],  // karasulari sinirinin obur tarafi
 };
 
 // Derinlik katmani: deniz haritasi mantigi — sig koyu, derin acik. Teknenin
@@ -29,8 +30,10 @@ const OBSTACLE_COLOUR = [140, 26, 26, 135];
 const UNSAFE_COLOUR = [214, 60, 52, 130];
 const MARGINAL_COLOUR = [242, 155, 46, 135];
 const UNKNOWN_COLOUR = [92, 92, 102, 150];
+const FOREIGN_COLOUR = [123, 47, 242, 95];
 
 export const DEPTH_LEGEND = [
+  { label: 'sinir disi', colour: 'rgb(123,47,242)' },
   { label: 'kiyi/engel', colour: 'rgb(140,26,26)' },
   { label: 'sig', colour: 'rgb(214,60,52)' },
   { label: 'sinirda', colour: 'rgb(242,155,46)' },
@@ -45,6 +48,7 @@ export const DEPTH_LEGEND = [
 /** Renk, teknenin gereksiniminin USTUNDEKI paya gore secilir. */
 function depthColour(depth, mask, required) {
   if (mask === 2) return [0, 0, 0, 0];
+  if (mask === 16) return FOREIGN_COLOUR;
   if (mask === 4) return OBSTACLE_COLOUR;
   if (mask === 0 || !Number.isFinite(depth)) return UNKNOWN_COLOUR;
   if (depth < required) return UNSAFE_COLOUR;
@@ -91,6 +95,7 @@ export class MapView {
     this.accuracyCircle = null;
     this.gridOverlay = null;
     this.unverifiedLines = null;
+    this.boundaryLayer = null;
     this.soundingLayer = null;
     this.soundingGrid = null;
     this.searchMarker = null;
@@ -172,6 +177,19 @@ export class MapView {
       dashArray: computed ? null : '8 6',
       lineJoin: 'round',
     }).addTo(this.map);
+  }
+
+  /**
+   * Karasulari siniri. Her zaman cizilir — kisit kapaliyken de nerede oldugunu
+   * gormek isterseniz diye. OSM'nin cizgisidir; hukuki dayanak degildir.
+   */
+  setBoundaries(lines) {
+    if (this.boundaryLayer) { this.map.removeLayer(this.boundaryLayer); this.boundaryLayer = null; }
+    if (!lines || !lines.length) return;
+    this.boundaryLayer = L.layerGroup(lines.map(line => L.polyline(line, {
+      color: '#7b2ff2', weight: 2.5, opacity: 0.85, dashArray: '10 5 2 5', interactive: true,
+    }).bindTooltip('Karasulari siniri (OpenStreetMap) — tartismali, hukuki dayanak degildir',
+      { sticky: true }))).addTo(this.map);
   }
 
   /** Derinlik kontrolu yapilmamis parcalar: kirmizi, kesikli, karistirilmaz. */

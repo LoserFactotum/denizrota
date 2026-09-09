@@ -73,6 +73,7 @@ way["natural"="coastline"](${b});
 nwr["seamark:type"~"^(rock|wreck|obstruction|restricted_area|military_area|marine_farm)$"](${b});
 nwr["man_made"~"^(pier|breakwater|groyne)$"](${b});
 nwr["natural"="reef"](${b});
+way["boundary"="administrative"]["admin_level"="2"]["maritime"="yes"](${b});
 );out body geom;`;
 }
 

@@ -141,6 +141,15 @@
       <div id="boat-fields" class="fields"></div>
       <div class="required-depth">Aranan model derinligi: <b id="required-depth">7,5 m</b></div>
       <label class="switch-row">
+        <span>Sadece kendi karasularimda kal</span>
+        <input id="own-waters" type="checkbox" checked>
+      </label>
+      <p class="hint">Rota, baslangic noktanizin bulundugu karasularindan cikmaz.
+        Sinir <b>OpenStreetMap</b> verisidir. Ege'de deniz sinirlari tartismalidir:
+        Turkiye ve Yunanistan Ege'de 6 mil uygular, bazi alanlarin statusu anlasmazlik
+        konusudur. Bu cizgi <b>bir yorumdur, hukuki dayanak degildir</b> ve sahil
+        guvenlik uygulamasini baglamaz. Kapatirsaniz sinir yine haritada gorunur.</p>
+      <label class="switch-row">
         <span>Hesap cozunurlugu</span>
         <select id="resolution">
           <option value="auto">Otomatik (alana gore en ince)</option>
