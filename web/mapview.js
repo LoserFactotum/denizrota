@@ -91,6 +91,8 @@ export class MapView {
     this.accuracyCircle = null;
     this.gridOverlay = null;
     this.unverifiedLines = null;
+    this.windLayer = null;
+    this.anchorLayer = null;
     this.soundingLayer = null;
     this.soundingGrid = null;
     this.searchMarker = null;
@@ -172,6 +174,54 @@ export class MapView {
       dashArray: computed ? null : '8 6',
       lineJoin: 'round',
     }).addTo(this.map);
+  }
+
+  /**
+   * Ruzgar oklari: her donus noktasinda, oraya varilacak saatteki ruzgar.
+   * Ok ruzgarin GITTIGI yone bakar (meteoroloji "geldigi" yonu verir, 180° cevrilir);
+   * etiket hiz (kn). Renk siddete gore: sakin, orta, sert, firtina.
+   */
+  setWind(arrows) {
+    if (this.windLayer) { this.map.removeLayer(this.windLayer); this.windLayer = null; }
+    if (!arrows || !arrows.length) return;
+    this.windLayer = L.layerGroup(arrows.filter(a => Number.isFinite(a.speedKn) && Number.isFinite(a.dirDeg)).map(a => {
+      const level = a.speedKn >= 30 ? 'gale' : a.speedKn >= 22 ? 'strong' : a.speedKn >= 12 ? 'fresh' : 'calm';
+      const toward = (a.dirDeg + 180) % 360;
+      return L.marker([a.latitude, a.longitude], {
+        interactive: true, zIndexOffset: 300,
+        icon: L.divIcon({
+          className: '',
+          html: `<div class="wind ${level}"><span class="wind-arrow" style="transform:rotate(${toward}deg)">➤</span>`
+            + `<span class="wind-label">${Math.round(a.speedKn)}</span></div>`,
+          iconSize: [44, 44], iconAnchor: [22, 22],
+        }),
+      }).bindTooltip(a.tooltip ?? `${Math.round(a.speedKn)} kn, ${Math.round(a.dirDeg)}°'den`, { direction: 'top', offset: [0, -20] });
+    })).addTo(this.map);
+  }
+
+  /**
+   * Capa nobeti: capa noktasi, salinim yaricapi ve teknenin o zamandan beri
+   * cizdigi iz. Daire disina cikan tekne alarm demektir; renk buna gore.
+   */
+  setAnchor(anchor, trail = [], { alarm = false } = {}) {
+    if (this.anchorLayer) { this.map.removeLayer(this.anchorLayer); this.anchorLayer = null; }
+    if (!anchor) return;
+    const colour = alarm ? '#c0392b' : '#0d6b4f';
+    const layers = [
+      L.circle([anchor.latitude, anchor.longitude], {
+        radius: anchor.radiusM, color: colour, weight: 2, fillColor: colour, fillOpacity: 0.08, interactive: false,
+      }),
+      L.marker([anchor.latitude, anchor.longitude], {
+        interactive: false, zIndexOffset: 900,
+        icon: L.divIcon({ className: '', html: '<div class="anchor-marker">⚓</div>', iconSize: [28, 28], iconAnchor: [14, 14] }),
+      }),
+    ];
+    if (trail.length > 1) {
+      layers.push(L.polyline(trail.map(p => [p.latitude, p.longitude]), {
+        color: '#1668d6', weight: 2, opacity: 0.7, interactive: false,
+      }));
+    }
+    this.anchorLayer = L.layerGroup(layers).addTo(this.map);
   }
 
   /** Derinlik kontrolu yapilmamis parcalar: kirmizi, kesikli, karistirilmaz. */
