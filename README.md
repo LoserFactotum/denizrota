@@ -129,6 +129,13 @@ portlandı:
 
 Ayrıntı: [`docs/DOGRULAMA.md`](docs/DOGRULAMA.md).
 
+## Yol haritası
+
+Konuşulmuş ama henüz yapılmamış işler — çapa nöbeti, rota boyunca rüzgâr/dalga,
+kalkış saati, polar tabanlı hava rotalaması, kendi iskandil kayıtları — ve
+cevap bekleyen tasarım soruları: [`docs/YOL-HARITASI.md`](docs/YOL-HARITASI.md).
+Bunlara ait taslak kod `taslak/capa-nobeti-ve-hava` dalında; `main`'e bağlı değil.
+
 ## Lisans
 
 Kod [MIT](LICENSE) lisanslıdır. Kullanılan veriler kendi lisanslarına tabidir
