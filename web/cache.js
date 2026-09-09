@@ -5,6 +5,7 @@
 const CACHE_NAME = 'denizrota-sources-v1';
 const ORIGIN = 'https://denizrota.local/source/';
 const MAX_ENTRIES = 12;
+const CACHE_SECONDS = 86400;
 
 export class SourceCache {
   constructor(name = CACHE_NAME) { this.name = name; }
@@ -26,19 +27,49 @@ export class SourceCache {
     } catch { return null; }
   }
 
-  async put(key, bytes, downloadedAt) {
+  async put(key, bytes, downloadedAt, meta) {
     const cache = await this.open();
     if (!cache) return;
     try {
-      await cache.put(ORIGIN + key, new Response(bytes, {
-        headers: {
-          'content-type': 'application/octet-stream',
-          'content-length': String(bytes.length),
-          'x-downloaded-at': String(downloadedAt),
-        },
-      }));
+      const headers = {
+        'content-type': 'application/octet-stream',
+        'content-length': String(bytes.length),
+        'x-downloaded-at': String(downloadedAt),
+      };
+      // Uzamsal meta: daha sonra bu kutuyu KAPSAYAN bir istek geldiginde
+      // yeniden indirmek yerine bu girdi kullanilabilsin.
+      if (meta?.family) headers['x-family'] = meta.family;
+      if (meta?.bbox) headers['x-bbox'] = meta.bbox;
+      await cache.put(ORIGIN + key, new Response(bytes, { headers }));
       await this.trim(cache);
     } catch { /* onbellek dolu olabilir; hesap yine de calisir */ }
+  }
+
+  /**
+   * Ayni aileden, taze ve istenen kutuyu TAMAMEN KAPSAYAN bir girdi bul.
+   * Birden fazlasi varsa en kucuk olani secilir: gereksiz yere devasa bir
+   * yaniti islemeyelim.
+   */
+  async findContaining(family, bbox) {
+    const cache = await this.open();
+    if (!cache) return null;
+    try {
+      const keys = await cache.keys();
+      let best = null;
+      for (const request of keys) {
+        const response = await cache.match(request);
+        if (!response || response.headers.get('x-family') !== family) continue;
+        const at = Number(response.headers.get('x-downloaded-at'));
+        if (!Number.isFinite(at) || Date.now() - at < 0 || Date.now() - at >= CACHE_SECONDS * 1000) continue;
+        const stored = String(response.headers.get('x-bbox') ?? '').split(',').map(Number);
+        if (stored.length !== 4 || !stored.every(Number.isFinite)) continue;
+        if (!(stored[0] <= bbox[0] && stored[1] <= bbox[1] && stored[2] >= bbox[2] && stored[3] >= bbox[3])) continue;
+        const area = (stored[2] - stored[0]) * (stored[3] - stored[1]);
+        if (!best || area < best.area) best = { area, response, at, bbox: stored };
+      }
+      if (!best) return null;
+      return { bytes: new Uint8Array(await best.response.arrayBuffer()), downloadedAt: best.at, bbox: best.bbox };
+    } catch { return null; }
   }
 
   async trim(cache) {

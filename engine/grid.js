@@ -102,8 +102,30 @@ export function cellCentre(bounds, index, name = 'Rota donusu') {
 export function downloadBBox(bounds) {
   return [bounds.west - 0.01, bounds.south - 0.01, bounds.east + 0.01, bounds.north + 0.01].join(',');
 }
-export function overpassBBox(bounds) {
-  return [bounds.south - 0.01, bounds.west - 0.01, bounds.north + 0.01, bounds.east + 0.01].join(',');
+/**
+ * Overpass kutusu DISARI dogru 0,25 dereceye yuvarlanir.
+ *
+ * Boylece ayni bolgedeki her rota AYNI sorgu metnini uretir ve gunluk
+ * onbellekten karsilanir. Teknede zayif LTE'de ve Overpass'in IP basina slot
+ * limiti altinda asil sorun tekrar tekrar indirmekti; bu onu bitiriyor.
+ * Bedeli olculdu: Datca-Marmaris kutusu icin 2,4 MB -> 3,4 MB, 10 -> 11 sn.
+ *
+ * Daha genis kutu sonucu DEGISTIRMEZ: grid disindaki nesneler hicbir hucreye
+ * dokunmaz (blockShape sinir disini atlar), kiyi butunluk kontrolu yalnizca
+ * grid ICINDEKI dugumlere bakar, ve tarama cizgisinin batisindaki fazladan
+ * kesisimler kara/deniz paritesini yalnizca daha saglam kurar.
+ */
+export const OVERPASS_SNAP_DEGREES = 0.25;
+
+export function overpassBBox(bounds, step = OVERPASS_SNAP_DEGREES) {
+  const snap = (value, direction) => {
+    const snapped = direction < 0 ? Math.floor(value / step) * step : Math.ceil(value / step) * step;
+    return Number(snapped.toFixed(4));
+  };
+  return [
+    snap(bounds.south - 0.01, -1), snap(bounds.west - 0.01, -1),
+    snap(bounds.north + 0.01, 1), snap(bounds.east + 0.01, 1),
+  ].join(',');
 }
 
 /**

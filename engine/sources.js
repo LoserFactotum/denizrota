@@ -8,14 +8,35 @@
 import { downloadBBox, overpassBBox, PlanningError } from './grid.js';
 
 export const BATHYMETRY_ENDPOINT = 'https://ows.emodnet-bathymetry.eu/wcs';
-// Overpass sunuculari sirayla denenir. Tek sunucu yogunlukta 429 dondurdugunde
-// rota hesabi tamamen durmasin diye; hepsi ayni OSM verisini sunar ve hepsi
+// Overpass sunuculari sirayla denenir; hepsi ayni OSM verisini sunar ve hepsi
 // CORS'a acik. Sira, ana sunucudan aynalara dogrudur.
+//
+// Overpass IP basina yalnizca birkac es zamanli slot verir. Slotlar dolunca
+// dogru davranis BEKLEMEKTIR; sunuculari saniyeler icinde arka arkaya
+// zorlamak durumu kotulestirir. Bu yuzden tur tur denenir ve turlar arasinda
+// giderek artan sure beklenir.
 export const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
   'https://overpass.private.coffee/api/interpreter',
 ];
+export const OVERPASS_RETRY_WAITS_MS = [0, 8000, 25000, 60000];
+
+/** Iptal edilebilir bekleme. */
+function delay(ms, signal) {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { signal?.removeEventListener?.('abort', onAbort); resolve(); }, ms);
+    function onAbort() {
+      clearTimeout(timer);
+      const error = new Error('Hesap iptal edildi.');
+      error.name = 'AbortError';
+      reject(error);
+    }
+    if (signal?.aborted) { onAbort(); return; }
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+  });
+}
 export const OVERPASS_ENDPOINT = OVERPASS_ENDPOINTS[0];
 export const SOURCE_LABEL = 'EMODnet DTM · GEBCO dolgusu dahil';
 export const MAX_RESPONSE_BYTES = 80000000;
@@ -46,14 +67,17 @@ export function bathymetryURL(bounds) {
   return `${BATHYMETRY_ENDPOINT}?${search}`;
 }
 
-export function overpassQuery(bounds) {
-  const b = overpassBBox(bounds);
+export function overpassQueryForBBox(b) {
   return `[out:json][timeout:90];(
 way["natural"="coastline"](${b});
 nwr["seamark:type"~"^(rock|wreck|obstruction|restricted_area|military_area|marine_farm)$"](${b});
 nwr["man_made"~"^(pier|breakwater|groyne)$"](${b});
 nwr["natural"="reef"](${b});
 );out body geom;`;
+}
+
+export function overpassQuery(bounds) {
+  return overpassQueryForBBox(overpassBBox(bounds));
 }
 
 export async function sha256Hex(bytes) {
@@ -76,7 +100,7 @@ async function cacheKey(url, body) {
  * the caller always validates it. Obvious XML/HTML error pages and Overpass
  * "remark" responses are never cached as if they were data.
  */
-export async function fetchSource({ url, body, cache, signal, label, cacheId }) {
+export async function fetchSource({ url, body, cache, signal, label, cacheId, meta }) {
   // Onbellek kimligi istekten ayrilabilir: ayni Overpass sorgusu hangi aynadan
   // gelirse gelsin ayni veridir, tekrar indirilmemeli.
   const key = await cacheKey(cacheId ?? url, body);
@@ -126,7 +150,7 @@ export async function fetchSource({ url, body, cache, signal, label, cacheId }) 
       if (parsed && parsed.remark) cacheable = false;
     } catch { cacheable = false; }
   }
-  if (cache && cacheable) await cache.put(key, bytes, downloadedAt);
+  if (cache && cacheable) await cache.put(key, bytes, downloadedAt, meta);
   return { bytes, downloadedAt, fromCache: false };
 }
 
@@ -136,30 +160,78 @@ export async function fetchBathymetry(bounds, { cache, signal } = {}) {
   return { ...result, url };
 }
 
-export async function fetchOSM(bounds, { cache, signal, onProgress } = {}) {
-  const query = overpassQuery(bounds);
+/** "s,w,n,e" metnini sayilara cevirir. */
+function parseBBox(text) {
+  const parts = String(text).split(',').map(Number);
+  return parts.length === 4 && parts.every(Number.isFinite) ? parts : null;
+}
+
+/** a kutusu b kutusunu tamamen kapsiyor mu? (s,w,n,e sirasi) */
+function contains(a, b) {
+  return a[0] <= b[0] && a[1] <= b[1] && a[2] >= b[2] && a[3] >= b[3];
+}
+
+export async function fetchOSM(bounds, { cache, signal, onProgress, retryWaitsMs = OVERPASS_RETRY_WAITS_MS } = {}) {
+  const bboxText = overpassBBox(bounds);
+  const bbox = parseBBox(bboxText);
+  const query = overpassQueryForBBox(bboxText);
   const body = new URLSearchParams({ data: query }).toString();
   let last = null;
-  for (let i = 0; i < OVERPASS_ENDPOINTS.length; i++) {
-    const url = OVERPASS_ENDPOINTS[i];
-    const host = new URL(url).host;
-    try {
-      const result = await fetchSource({
-        url, body, cache, signal,
-        cacheId: 'overpass',
-        label: `OpenStreetMap Overpass (${host})`,
-      });
-      return { ...result, query, endpoint: url };
-    } catch (error) {
-      if (error?.name === 'AbortError') throw error;
-      last = error;
-      // Yalnizca sunucu mesgul/erisilemez oldugunda aynaya gec. Sorgu hatasi
-      // her sunucuda ayni sonucu verecegi icin tekrar denemek anlamsizdir.
-      const retryable = error?.busy || error?.detail?.cause;
-      if (!retryable || i === OVERPASS_ENDPOINTS.length - 1) throw error;
-      onProgress?.(`${host} yogun, yedek sunucu deneniyor…`);
-      await new Promise(resolve => setTimeout(resolve, 1200));
+
+  // Daha once indirilmis DAHA GENIS bir kutu bu rotayi kapsiyorsa onu kullan.
+  // Teknede zayif LTE'de ve Overpass'in IP basina slot limiti altinda en degerli
+  // kazanc bu: ayni bolgede ikinci rota hic indirme yapmaz.
+  //
+  // Guvenli: grid disindaki nesneler hicbir hucreye dokunmaz, kiyi butunluk
+  // kontrolu yalnizca grid icindeki dugumlere bakar, ve tarama cizgisinin
+  // batisindaki fazladan kesisimler kara/deniz paritesini daha saglam kurar.
+  if (cache?.findContaining && bbox) {
+    const hit = await cache.findContaining('overpass', bbox);
+    if (hit) {
+      return {
+        bytes: hit.bytes, downloadedAt: hit.downloadedAt, fromCache: true,
+        query: overpassQueryForBBox(hit.bbox.join(',')),
+        endpoint: 'onbellek', cachedBBox: hit.bbox.join(','),
+      };
     }
   }
-  throw last;
+
+  for (let round = 0; round < retryWaitsMs.length; round++) {
+    const wait = retryWaitsMs[round];
+    if (wait > 0) {
+      // Slotun bosalmasini beklerken kullaniciya ne kadar kaldigini soyle:
+      // dugmeye tekrar basmak durumu kotulestirir.
+      for (let left = Math.round(wait / 1000); left > 0; left--) {
+        onProgress?.(`Overpass sunuculari yogun. ${left} sn sonra yeniden denenecek…`);
+        await delay(1000, signal);
+      }
+    }
+    for (const url of OVERPASS_ENDPOINTS) {
+      const host = new URL(url).host;
+      try {
+        onProgress?.(round === 0
+          ? `Kiyi, kayalik, batik ve engeller indiriliyor (${host})…`
+          : `Yeniden deneniyor: ${host}…`);
+        const result = await fetchSource({
+          url, body, cache, signal,
+          cacheId: 'overpass',
+          meta: { family: 'overpass', bbox: bboxText },
+          label: `OpenStreetMap Overpass (${host})`,
+        });
+        return { ...result, query, endpoint: url };
+      } catch (error) {
+        if (error?.name === 'AbortError') throw error;
+        last = error;
+        // Yalnizca sunucu mesgul/erisilemez oldugunda devam et. Sorgu hatasi
+        // her sunucuda ayni sonucu verecegi icin tekrar denemek anlamsizdir.
+        const retryable = error?.busy || error?.detail?.cause;
+        if (!retryable) throw error;
+      }
+    }
+  }
+  throw new PlanningError(
+    'OpenStreetMap Overpass sunuculari su an yanit vermiyor. Birkac dakika sonra '
+    + 'tekrar deneyin — ayni bolgede daha once hesaplanmis bir rota varsa o veri '
+    + 'onbellekten kullanilabilir.',
+    { busy: true, cause: last?.message });
 }
