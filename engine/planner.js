@@ -120,7 +120,17 @@ export function diagnoseAnchor({ grid, boat, point, searchMetres = 12000 }) {
     depthUncertaintyM: new Float64Array(grid.total),
     flags: grid.flags,
   };
-  const { pass, radius, prefix, stride } = passableCells(engineGrid, vesselFor(boat));
+  const vessel = vesselFor(boat);
+  const { pass, radius, prefix, stride } = passableCells(engineGrid, vessel);
+  // Oneri icin BIR HUCRE DAHA genis pay ile gecilebilirlik.
+  //
+  // Fiili pay ceil(pay/hucre)*hucre'dir, yani hucre boyutuna gore 150 m istek
+  // 180 hatta 250 m'ye cikar. Rota kutusu her denemede degistigi icin hucre de
+  // degisebiliyor; bir denemede "uygun" bulunan nokta digerinde reddediliyor ve
+  // oneriler yakinsamiyordu. Oneriyi bir hucre paylı secmek bunu bitiriyor.
+  const { pass: passStrict } = passableCells(engineGrid, {
+    ...vessel, horizontalBufferM: vessel.horizontalBufferM + cell,
+  });
   // passableCells' own `required` is the right-hand side of
   //   depth + waterLevelLowerM - uncertainty >= required
   // so it deliberately EXCLUDES the water-level drop. Comparing a raw cell depth
@@ -152,7 +162,8 @@ export function diagnoseAnchor({ grid, boat, point, searchMetres = 12000 }) {
     clear = rr;
     if (rr > radius) break;
   }
-  const usableBufferM = clear < 0 ? null : clear * cell;
+  // Onerilen pay da bir hucre asagi yuvarlanir: farkli hucre boyutunda da gecerli kalsin.
+  const usableBufferM = clear < 1 ? null : (clear - 1) * cell;
 
   // Nearest usable water, reachable OVER WATER from the blocked point.
   //
@@ -196,7 +207,7 @@ export function diagnoseAnchor({ grid, boat, point, searchMetres = 12000 }) {
   let best = null, waterSteps = 0, levelEnd = tail;
   while (head < tail && waterSteps <= maxSteps) {
     const i = queue[head++];
-    if (pass[i]) { best = { index: i, steps: waterSteps }; break; }
+    if (passStrict[i]) { best = { index: i, steps: waterSteps }; break; }
     const r = Math.floor(i / columns), c = i - r * columns;
     if (r > 0) push(i - columns);
     if (r + 1 < rows) push(i + columns);
@@ -221,7 +232,82 @@ export function diagnoseAnchor({ grid, boat, point, searchMetres = 12000 }) {
     modelDepth: Number.isFinite(grid.depths[index]) ? grid.depths[index] : null,
     requiredDepth: required,
     bufferM: boat.horizontalBuffer,
+    effectiveBufferM: radius * cell,
+    cellM: cell,
     usableBufferM,
+    nearest,
+  };
+}
+
+/**
+ * "Rota bulunamadi" durumunu ayristirir.
+ *
+ * Iki cok farkli sebep ayni hataya cikiyordu: (a) arama alani dar kalmis,
+ * (b) varis, deniz yoluyla ulasilamayan kucuk bir cebin icinde — Marmaris ic
+ * korfezi gibi, girisini model sig gordugu icin. Ikincisinde alani genisletmek
+ * hicbir sey degistirmez; kullaniciya ulasilabilir en yakin suyu gostermek ve
+ * dilerse dogrulanmamis etapla baglamasini onermek gerekir.
+ */
+export function diagnoseNoRoute({ grid, boat, from, to }) {
+  const bounds = grid.bounds;
+  const { rows, columns, cell } = bounds;
+  const total = rows * columns;
+  const engineGrid = {
+    rows, columns, cellSizeM: cell,
+    chartedDepthM: grid.depths,
+    depthUncertaintyM: new Float64Array(total),
+    flags: grid.flags,
+  };
+  const { pass } = passableCells(engineGrid, vesselFor(boat));
+  let start, goal;
+  try { start = indexOf(bounds, from); goal = indexOf(bounds, to); } catch { return null; }
+
+  const flood = (seed) => {
+    const seen = new Uint8Array(total);
+    if (!pass[seed]) return { seen, count: 0 };
+    const queue = new Int32Array(total);
+    let head = 0, tail = 0, count = 0;
+    queue[tail++] = seed; seen[seed] = 1;
+    while (head < tail) {
+      const i = queue[head++];
+      count++;
+      const r = Math.floor(i / columns), c = i - r * columns;
+      if (r > 0) { const j = i - columns; if (!seen[j] && pass[j]) { seen[j] = 1; queue[tail++] = j; } }
+      if (r + 1 < rows) { const j = i + columns; if (!seen[j] && pass[j]) { seen[j] = 1; queue[tail++] = j; } }
+      if (c > 0) { const j = i - 1; if (!seen[j] && pass[j]) { seen[j] = 1; queue[tail++] = j; } }
+      if (c + 1 < columns) { const j = i + 1; if (!seen[j] && pass[j]) { seen[j] = 1; queue[tail++] = j; } }
+    }
+    return { seen, count };
+  };
+
+  const fromStart = flood(start);
+  if (fromStart.seen[goal]) return null; // ulasilabilir; sorun baska
+  const fromGoal = flood(goal);
+
+  const goalRow = Math.floor(goal / columns), goalCol = goal % columns;
+  let best = null;
+  for (let i = 0; i < total; i++) {
+    if (!fromStart.seen[i]) continue;
+    const r = Math.floor(i / columns), c = i - r * columns;
+    const d = Math.hypot(r - goalRow, c - goalCol);
+    if (!best || d < best.d) best = { d, index: i };
+  }
+  if (!best) return null;
+  const nearest = {
+    ...cellCentre(bounds, best.index, `${to.name ?? 'Varis'} (ulasilabilir su)`),
+    distanceM: best.d * cell,
+  };
+  nearest.bearingDeg = initialBearingDeg(to.latitude, to.longitude, nearest.latitude, nearest.longitude);
+  return {
+    reason: 'isolated',
+    reasonText: 'varis noktasi, baslangictan deniz yoluyla ulasilamayan kucuk bir cebin icinde',
+    reachableCells: fromStart.count,
+    pocketCells: fromGoal.count,
+    requiredDepth: minimumDepthFor(boat),
+    bufferM: boat.horizontalBuffer,
+    effectiveBufferM: Math.ceil(boat.horizontalBuffer / cell) * cell,
+    cellM: cell,
+    usableBufferM: null,
     nearest,
   };
 }
@@ -297,12 +383,16 @@ function metres(value) {
 }
 
 function blockedError(point, diagnosis, status) {
+  const effective = diagnosis?.effectiveBufferM;
   const parts = [`'${point.name ?? 'Nokta'}' bu haliyle kullanilamiyor: ${diagnosis?.reasonText ?? 'gecilemez alanda'}.`];
   if (diagnosis?.reason === 'shallow' && diagnosis.modelDepth !== null) {
     parts.push(`Model derinligi ${diagnosis.modelDepth.toFixed(1)} m, gereken ${diagnosis.requiredDepth.toFixed(1)} m.`);
   }
   if (diagnosis?.reason === 'unresolved') {
     parts.push('Burasi gercekte derin olabilir; uygulama bunu dogrulayamadigi icin rota baslatmiyor.');
+  }
+  if (diagnosis?.reason === 'buffer' && Number.isFinite(effective) && effective > diagnosis.bufferM) {
+    parts.push(`(${diagnosis.bufferM} m istediniz; ${diagnosis.cellM} m hesap hucresinde fiilen ${effective} m uygulaniyor.)`);
   }
   if (diagnosis?.usableBufferM !== null && diagnosis?.usableBufferM !== undefined
     && diagnosis.usableBufferM < diagnosis.bufferM) {
@@ -366,6 +456,20 @@ export function routeOnGrid({ grid, anchors, boat, shouldCancel }) {
     if (result.status === DR_START_BLOCKED || result.status === DR_GOAL_BLOCKED) {
       const point = result.status === DR_START_BLOCKED ? from : to;
       throw blockedError(point, diagnoseAnchor({ grid, boat, point }), result.status);
+    }
+    if (result.status === DR_NO_ROUTE) {
+      const isolated = diagnoseNoRoute({ grid, boat, from, to });
+      // Kucuk, kopuk bir cep: alani genisletmek bir sey degistirmez. Kullaniciya
+      // ulasilabilir en yakin suyu goster; dogrulanmamis etap secenegi acilsin.
+      if (isolated && isolated.pocketCells > 0 && isolated.pocketCells < isolated.reachableCells / 20) {
+        throw new PlanningError(
+          `'${to.name ?? 'Varis'}' cevresi, baslangicinizdan deniz yoluyla ulasilamiyor: `
+          + `girisi modelde ${isolated.requiredDepth.toFixed(1)} m'den sig ya da kapali gorunuyor. `
+          + 'Dar korfez girislerinde model gridi (~115 m) yetersiz kalir; orasi gercekte gecilebilir olabilir. '
+          + `Ulasilabilir en yakin su ${Math.round(isolated.nearest.distanceM)} m uzakta. Nokta kendiliginden tasinmadi.`,
+          { blocked: to, diagnosis: isolated, status: result.status });
+      }
+      throw legError(result.status, from, to);
     }
     if (result.status !== DR_OK) throw legError(result.status, from, to);
     const problem = auditPath(grid, result.path, boat, start, goal);

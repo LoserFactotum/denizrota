@@ -39,6 +39,7 @@ export const check = {
 const suites = [
   ['birim testleri', './unit.mjs'],
   ['kaynak indirme ve onbellek', './sources.mjs'],
+  ['rota teshisi', './planner.mjs'],
   ['gercek veri regresyonu', './regression.mjs'],
 ];
 
