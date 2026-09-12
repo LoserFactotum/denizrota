@@ -9,6 +9,33 @@ bağlı değil. Tercihler netleşince oradan devam edilir.
 
 ---
 
+## 0. AÇIK HATA: seyir takibi çalışmıyor — öncelik 0
+
+**Durum:** Kullanıcı 12 Eylül 2026'da teknede bildirdi: *"takip çalışmıyor."*
+Ayrıntı alınamadı (tur bitti, geliştirme durduruldu). **Neden bilinmiyor** —
+aşağıdakiler doğrulanmamış tahminlerdir, önce üretilip teşhis edilmeli.
+
+Bakılacak yerler (`web/app.js`):
+
+- `usableFix()` filtresi fazla katı olabilir: doğruluk ≤ 50 m **ve** yaş ≤ 15 sn.
+  Cihaz saati ile GPS zaman damgası arasındaki fark, ya da `watchPosition`'ın
+  önbellekten konum döndürmesi geçerli sabitlemeleri eleyebilir. Filtre elerse
+  arayüz "GPS bekleniyor" der ve takip hiç başlamaz.
+- Takip yalnızca **hesaplanmış** rota varken açılıyor (`track-button` sonuç
+  bloğunun içinde). Elle çizilen rotada düğme hiç görünmez — kullanıcı bunu
+  "çalışmıyor" olarak yaşamış olabilir.
+- iOS Safari'de PWA arka plana alınınca konum akışı durur; öne dönünce yeni
+  sabitleme beklenir.
+- `wakeLock` reddedilirse ekran kilitlenir ve takip fiilen durur.
+- 50 m'de sonraki noktaya geçiş (`ADVANCE_METRES`) düzleştirmeden sonra
+  bacaklar uzadığı için beklenenden farklı davranıyor olabilir.
+
+**Yapılacak:** önce gerçek cihazda üret, `watchPosition` çıktısını ham olarak
+logla (doğruluk, yaş, hız), sonra filtreyi gerçek veriye göre gevşet. Otomatik
+testi yok; tarayıcı GPS'i taklit edilerek test edilebilir.
+
+---
+
 ## 1. Çapa nöbeti — öncelik 1
 
 **Ne:** Demirledikten sonra "Çapayı bıraktım" → çapa noktası + salınım

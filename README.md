@@ -10,6 +10,10 @@ gerektirmez; kendi sunucusu yoktur.
 Telefonda tarayıcıdan açılır, "Ana ekrana ekle" ile uygulama gibi çalışır.
 Kurulum, Mac ve Xcode gerekmez.
 
+> **Bu depo şu an duraklatılmıştır ve canlı site kapalıdır.** Bilinen açık hata:
+> seyir takibi çalışmıyor ([ayrıntı](docs/YOL-HARITASI.md)). Yeniden yayına almak
+> için `docs/GITHUB-ACTIONS.md`'ye bakın.
+
 > Bu resmi bir seyir haritası değildir. Güncel deniz haritası, fener listesi ve
 > gözle kontrol yerine geçmez. Sınırları [aşağıda](#neye-güvenilmez) açıkça yazdım.
 
